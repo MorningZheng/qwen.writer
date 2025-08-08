@@ -1,10 +1,16 @@
 {
-  "name": "writer",
+  "name": "ai-writer",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "AI Writer - 基于 OpenAI 的写作辅助工具",
+  "main": "writer.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "private": true
+  "author": "Your Name <your.email@example.com>",
+  "license": "ISC",
+  "dependencies": {
+    "@babel/parser": "^7.28.0",
+    "comment-parser": "^1.4.1",
+    "yaml": "^2.8.0"
+  }
 }

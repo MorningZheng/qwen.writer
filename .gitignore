@@ -8,3 +8,6 @@
 /dataSources/
 /dataSources.local.xml
 
+/.cache/
+/node_modules/
+/data/

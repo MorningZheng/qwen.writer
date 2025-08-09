@@ -196,71 +196,80 @@ const use_trim = text => {
  * @param {string} path - 目录路径。
  * @returns {Promise<Array>} 函数描述对象数组。
  */
-const use_functions = async path => {
-    const result = [];
-    for (const f of await fs.readdir(path, {withFileTypes: true})) {
-        const filename = join(path, f.name);
-        if (f.isDirectory()) result.push(...await use_functions(filename));
-        else (function walk(nodes) {
-            for (const node of nodes) {
-                if (node.type !== 'ExpressionStatement') continue;
-                const {operator, left, right} = node.expression;
-                if (operator !== '=' || left.object?.name !== 'module') continue;
+const use_functions = (() => {
+    const cache = {};
+    return async path => {
+        const result = [];
+        for (const f of await fs.readdir(path, {withFileTypes: true})) {
+            const filename = join(path, f.name);
+            if (f.isDirectory()) result.push(...await use_functions(filename));
+            else if (cache[filename]) result.push(...cache[filename]);
+            else {
+                cache[filename] = [];
+                (function walk(nodes) {
+                    for (const node of nodes) {
+                        if (node.type !== 'ExpressionStatement') continue;
+                        const {operator, left, right} = node.expression;
+                        if (operator !== '=' || left.object?.name !== 'module') continue;
 
-                for (const fn of right?.properties ?? []) {
-                    if (fn.kind !== 'method') continue;
-                    const body = {}, desc = [], output = [], params = {}, required = [];
+                        for (const fn of right?.properties ?? []) {
+                            if (fn.kind !== 'method') continue;
+                            const body = {}, desc = [], params = {}, required = [];
 
-                    for (const p of fn.params) {
-                        if (p.type === 'Identifier') {
-                            params[p.name] = {};
-                            required.push(p.name);
-                        } else if (p.type === 'AssignmentPattern') params[p.left.name] = {};
-                    }
-
-                    if (!Array.isArray(fn.leadingComments)) continue;
-                    for (const {value} of fn.leadingComments) {
-                        for (const c of comment.parse(`/*${value}*/`)) {
-                            desc.push(c.description);
-                            for (const t of c.tags) {
-                                if (t.tag === 'param') {
-                                    params[t.name] = {
-                                        type: t.type,
-                                        description: t.description,
-                                    };
-                                } else if (t.tag === 'return') output.push(t.name, t.description);
+                            for (const p of fn.params) {
+                                if (p.type === 'Identifier') {
+                                    params[p.name] = {};
+                                    required.push(p.name);
+                                } else if (p.type === 'AssignmentPattern') params[p.left.name] = {};
                             }
+
+                            if (!Array.isArray(fn.leadingComments)) continue;
+                            for (const {value} of fn.leadingComments) {
+                                for (const c of comment.parse(`/*${value}*/`)) {
+                                    desc.push(c.description);
+                                    for (const t of c.tags) {
+                                        if (t.tag === 'param') {
+                                            params[t.name] = {
+                                                type: t.type,
+                                                description: t.description,
+                                            };
+                                        } //else if (t.tag === 'return') output.push(t.name, t.description);
+                                    }
+                                }
+                            }
+                            cache[filename].push({type: "function", function: body});
+                            const args = Object.keys(params).join(','), hash = md5(filename),
+                                name = `${hash}:${fn.key.name}`;
+
+                            use_functions[name] = {
+                                name: fn.key.name,
+                                path: filename,
+                                call: new Function(`return (fn,{${args}})=>fn(${args})`)(),
+                            };
+                            Object.assign(body, {
+                                name,
+                                description: desc.join('\n'),
+                                parameters: {
+                                    type: "object",
+                                    properties: params,
+                                    [required.length ? 'required' : Symbol('required')]: required,
+                                },
+                            });
                         }
                     }
-                    result.push({type: "function", function: body});
-                    const names = Object.keys(params).join(',');
-                    use_functions[body.name = fn.key.name] = {
-                        path: filename,
-                        name: fn.key.name,
-                        call: new Function(`return (fn,{${names}})=>fn(${names})`)(),
-                    };
-                    Object.assign(body, {
-                        description: desc.join('\n'),
-                        parameters: {
-                            type: "object",
-                            properties: params,
-                            [required.length ? 'required' : Symbol('required')]: required,
-                        },
-                    });
-                }
+                })(babel.parse(await fs.readFile(filename, {encoding: 'utf-8'}), {
+                    sourceType: 'module',
+                    plugins: ['typescript', 'jsx'],
+                    ranges: true,
+                    tokens: true
+                }).program.body);
+                result.push(...cache[filename]);
             }
-        })(babel.parse(await fs.readFile(filename, {encoding: 'utf-8'}), {
-            sourceType: 'module',
-            plugins: ['typescript', 'jsx'],
-            ranges: true,
-            tokens: true
-        }).program.body);
-    }
+        }
 
-    return result;
-};
-
-const tool_choice = name => ({type: "function", function: {"name": name}});
+        return result;
+    };
+})();
 
 module.exports = {
     use_prompt,

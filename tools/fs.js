@@ -3,12 +3,24 @@ const {join,dirname}=require("path");
 
 module.exports = {
     /**
-     * 当你需要你读文件内容的时候，这会非常有用
+     * 当你需要你读文本文件内容（例如json、md、txt等文本）的时候，这会非常有用
      * @param {string} file_name 要读取的文件路径
      */
-    read_file(file_name) {
+    read_text(file_name) {
         console.log('Read file:',file_name);
         return fs.readFile(join(dirname(__dirname),file_name),'utf-8').catch(e=>'文件不存在或读取失败: ' + e.message);
+    },
+
+    /**
+     * 当你需要写文本文件内容（例如json、md、txt等文本）的时候，这会非常有用
+     * @param {string} file_name 要写入的文件路径
+     * @param {string} content 要写入的内容
+     */
+    write_text(file_name, content) {
+        const file=join(dirname(__dirname),file_name);
+        return fs.mkdir(dirname(file),{recursive:true})
+            .then(()=>fs.writeFile(file,content))
+            .catch(e=>'文件写入失败: ' + e.message);
     },
 
     /**
@@ -16,6 +28,7 @@ module.exports = {
      * @param {string} dir_path 要读取的路径
      */
     list_dir(dir_path) {
-        return fs.readdir(dir_path);
+        return fs.readdir(dir_path,{withFileTypes:true})
+            .then(list=>list.map(f=>({name:f.name,[f.isFile()?'isFile':'isDirectory']:true})));
     },
 }

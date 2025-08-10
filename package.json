@@ -2,15 +2,16 @@
   "name": "ai-writer",
   "version": "1.0.0",
   "description": "AI Writer - 基于 OpenAI 的写作辅助工具",
-  "main": "writer.js",
+  "main": "writer-example.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "Your Name <your.email@example.com>",
+  "author": "zhengchen <zhengchen@nesthue.cn>",
   "license": "ISC",
   "dependencies": {
     "@babel/parser": "^7.28.0",
     "comment-parser": "^1.4.1",
-    "yaml": "^2.8.0"
+    "yaml": "^2.8.0",
+    "@larksuiteoapi/node-sdk": "^1.37.0"
   }
 }

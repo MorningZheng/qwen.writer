@@ -45,7 +45,7 @@ const set_cache = path => Object.assign(set_cache, {__path: path});
  * @returns {Promise<any>} assistant 返回的 choices。
  */
 const use_chat = (...args) =>
-    Promise.all(args.map(i => i[ANSWER_RESULT] ? use_assistant(i) : i))
+    Promise.all(args.map(i => i?.[ANSWER_RESULT] ? use_assistant(i) : i))
         .then(input => {
             const messages = [], functions = [];
             let tool_choice = undefined;

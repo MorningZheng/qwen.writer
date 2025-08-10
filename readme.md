@@ -15,7 +15,7 @@ writer
 ├── tools-example.js     # 工具函数示例
 ├── writer-example.js    # 主要功能实现
 ├── feishu-bot.js        # 接入飞书机器人的示例
-├── .env.yaml            # 主要功能实现
+├── .env.yaml            # 主要功能实现（需要自己建立）
 │
 ├── prompt/              # 提示词/模板目录
 │   ├── 个性化要求.md    # 个性化需求

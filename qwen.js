@@ -30,7 +30,8 @@ const set_prompt = path => Object.assign(set_prompt, {__path: path});
  */
 const use_prompt = (...names) => Promise.all(names.map((name) => fs.readFile(join(set_prompt.__path ?? 'prompt', `${name}.md`), 'utf-8')));
 
-const ANSWER_RESULT = Symbol('ANSWER_RESULT');
+const ANSWER_RESULT = Symbol.for('ANSWER_RESULT');
+
 
 /**
  * 设置缓存文件夹路径。
@@ -97,7 +98,8 @@ const use_chat = (...args) =>
                     for (const {message} of rs) {
                         for (const req of message.tool_calls) {
                             const {path, name, call} = use_functions[req.function.name];
-                            call_result = await Promise.resolve(call(require(`./${path}`)[name], JSON.parse(req.function.arguments)))
+                            call_result = await Promise.resolve(call(require(path)[name], JSON.parse(req.function.arguments)))
+                                .catch(e => e.toString())
                                 .then(res => use_chat(
                                     functions,
                                     messages,
@@ -194,82 +196,77 @@ const use_trim = text => {
 /**
  * 递归读取指定目录下的所有函数定义（需配合 babel 解析）。
  * @param {string} path - 目录路径。
+ * @param {Object} env - 环境变量对象，包含 API_KEY 和 BASE_URL 等。
  * @returns {Promise<Array>} 函数描述对象数组。
  */
-const use_functions = (() => {
-    const cache = {};
-    return async path => {
-        const result = [];
-        for (const f of await fs.readdir(path, {withFileTypes: true})) {
-            const filename = join(path, f.name);
-            if (f.isDirectory()) result.push(...await use_functions(filename));
-            else if (cache[filename]) result.push(...cache[filename]);
-            else {
-                cache[filename] = [];
-                (function walk(nodes) {
-                    for (const node of nodes) {
-                        if (node.type !== 'ExpressionStatement') continue;
-                        const {operator, left, right} = node.expression;
-                        if (operator !== '=' || left.object?.name !== 'module') continue;
+const use_functions = async (path, env) => {
+    const result = [];
+    path = await fs.realpath(path);
+    for (const f of await fs.readdir(path, {withFileTypes: true})) {
+        const filename = join(path, f.name);
+        if (f.isDirectory()) result.push(...await use_functions(filename, env));
+        else {
+            (function walk(nodes) {
+                for (const node of nodes) {
+                    if (node.type !== 'ExpressionStatement') continue;
+                    const {operator, left, right} = node.expression;
+                    if (operator !== '=' || left.object?.name !== 'module') continue;
 
-                        for (const fn of right?.properties ?? []) {
-                            if (fn.kind !== 'method') continue;
-                            const body = {}, desc = [], params = {}, required = [];
+                    for (const fn of right?.properties ?? []) {
+                        if (fn.kind !== 'method') continue;
+                        const body = {}, desc = [], params = {}, required = [];
 
-                            for (const p of fn.params) {
-                                if (p.type === 'Identifier') {
-                                    params[p.name] = {};
-                                    required.push(p.name);
-                                } else if (p.type === 'AssignmentPattern') params[p.left.name] = {};
-                            }
+                        for (const p of fn.params) {
+                            if (p.type === 'Identifier') {
+                                params[p.name] = {};
+                                required.push(p.name);
+                            } else if (p.type === 'AssignmentPattern') params[p.left.name] = {};
+                        }
 
-                            if (!Array.isArray(fn.leadingComments)) continue;
-                            for (const {value} of fn.leadingComments) {
-                                for (const c of comment.parse(`/*${value}*/`)) {
-                                    desc.push(c.description);
-                                    for (const t of c.tags) {
-                                        if (t.tag === 'param') {
-                                            params[t.name] = {
-                                                type: t.type,
-                                                description: t.description,
-                                            };
-                                        } //else if (t.tag === 'return') output.push(t.name, t.description);
-                                    }
+                        if (!Array.isArray(fn.leadingComments)) continue;
+                        for (const {value} of fn.leadingComments) {
+                            for (const c of comment.parse(`/*${value}*/`)) {
+                                desc.push(c.description);
+                                for (const t of c.tags) {
+                                    if (t.tag !== 'param') continue;
+                                    params[t.name] = {
+                                        type: t.type,
+                                        description: t.description,
+                                    };
                                 }
                             }
-                            cache[filename].push({type: "function", function: body});
-                            const args = Object.keys(params).join(','), hash = md5(filename),
-                                name = `${hash}:${fn.key.name}`;
-
-                            use_functions[name] = {
-                                name: fn.key.name,
-                                path: filename,
-                                call: new Function(`return (fn,{${args}})=>fn(${args})`)(),
-                            };
-                            Object.assign(body, {
-                                name,
-                                description: desc.join('\n'),
-                                parameters: {
-                                    type: "object",
-                                    properties: params,
-                                    [required.length ? 'required' : Symbol('required')]: required,
-                                },
-                            });
                         }
-                    }
-                })(babel.parse(await fs.readFile(filename, {encoding: 'utf-8'}), {
-                    sourceType: 'module',
-                    plugins: ['typescript', 'jsx'],
-                    ranges: true,
-                    tokens: true
-                }).program.body);
-                result.push(...cache[filename]);
-            }
-        }
+                        result.push({type: "function", function: body});
+                        const args = Object.keys(params).join(','), hash = md5(filename),
+                            name = `${hash}:${fn.key.name}`;
 
-        return result;
-    };
-})();
+                        use_functions[name] = {
+                            name: fn.key.name,
+                            path: filename,
+                            call: new Function('env', `return (fn,{${args}})=>fn.call(env,${args})`)(env),//允许导入env，使用this访问
+                        };
+                        Object.assign(body, {
+                            name,
+                            description: desc.join('\n'),
+                            parameters: {
+                                type: "object",
+                                properties: params,
+                                [required.length ? 'required' : Symbol('required')]: required,
+                            },
+                        });
+                    }
+                }
+            })(babel.parse(await fs.readFile(filename, {encoding: 'utf-8'}), {
+                sourceType: 'module',
+                plugins: ['typescript', 'jsx'],
+                ranges: true,
+                tokens: true
+            }).program.body);
+        }
+    }
+
+    return result;
+};
 
 module.exports = {
     use_prompt,

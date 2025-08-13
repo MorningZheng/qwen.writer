@@ -10,8 +10,8 @@
   "license": "ISC",
   "dependencies": {
     "@babel/parser": "^7.28.0",
+    "@larksuiteoapi/node-sdk": "^1.37.0",
     "comment-parser": "^1.4.1",
-    "yaml": "^2.8.0",
-    "@larksuiteoapi/node-sdk": "^1.37.0"
+    "yaml": "^2.8.0"
   }
 }

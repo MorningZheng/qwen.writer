@@ -1,3 +1,4 @@
+process.loadEnvFile('.env');
 // 引入自定义的qwen模块，包含与大模型交互的各种工具函数
 const {
     use_llm,         // 初始化大模型API

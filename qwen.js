@@ -1,5 +1,5 @@
 const {promises: fs} = require('fs');
-const {join} = require('path');
+const {join, dirname} = require('path');
 const yaml = require('yaml');
 const crypto = require("crypto");
 const comment = require('comment-parser');
@@ -12,9 +12,11 @@ const babel = require('@babel/parser');
  */
 const md5 = (...text) => crypto.createHash('md5').update(text.join('')).digest('hex');
 
+const entry = {file: process.argv[1], dir: dirname(process.argv[1])};
 const use_env = options => Promise.resolve(Object.assign(use_env, options));
 
 const maps = new WeakMap();
+const $require = require('module').createRequire(entry.file);
 
 /**
  * 设置 prompt 文件夹路径。
@@ -48,7 +50,7 @@ const set_cache = path => Object.assign(set_cache, {__path: path});
 const use_chat = (...args) =>
     Promise.all(args.map(i => i?.[ANSWER_RESULT] ? use_assistant(i) : i))
         .then(input => {
-            const messages = [], functions = [];
+            const messages = [], functions = [], salt = [];
             let tool_choice = undefined;
             (function walk(rows) {
                 for (const item of rows) {
@@ -57,12 +59,13 @@ const use_chat = (...args) =>
                     else if (item.type === 'function') {
                         if (item.function.hasOwnProperty('description')) functions.push(item);
                         else tool_choice = item;
-                    } else messages.push(item);
+                    } else if (item.constructor === String || item.constructor === Number) salt.push(String(item));
+                    else messages.push(item);
                 }
             })(input);
 
             /** @type array*/
-            console.log(`\x1b[33m${messages.slice(-1)[0].content.slice(0, 100)}...\x1b[0m`);
+            console.log(`\x1b[33m${messages.slice(-1)[0].content?.slice?.(0, 100)}...\x1b[0m`);
             const req = {model: use_env.MODEL[0], messages, max_tokens: 8192, temperature: 0.7};
             if (functions.length) Object.assign(req, {
                 model: use_env.MODEL[1] ?? use_env.MODEL[0],
@@ -71,7 +74,7 @@ const use_chat = (...args) =>
             });
             const body = JSON.stringify(req);
 
-            const filename = join(__dirname, set_cache.__path ?? '.cache', `${md5(body)}.yaml`);
+            const filename = join(entry.dir, set_cache.__path ?? '.cache', `${md5(body, ...salt)}.yaml`);
             return fs.readFile(filename, 'utf-8').then(t => yaml.parse(t).res.choices).catch(e =>
                 fetch(`${use_env.BASE_URL}/chat/completions`, {
                     method: 'POST',
@@ -84,13 +87,13 @@ const use_chat = (...args) =>
                     .then(res => res.json())
                     .then(res => {
                         if (res.error) throw Object.assign(new Error(res.error.messages), res.error);
-                        else return fs.mkdir(set_cache.__path ?? '.cache', {recursive: true})
-                            .then(() => fs.writeFile(filename, yaml.stringify({req, res}, null, 4)))
+                        else return fs.mkdir(dirname(filename), {recursive: true})
+                            .then(() => fs.writeFile(filename, yaml.stringify({salt, req, res}, null, 4)))
                             .then(() => res.choices);
                     })
             ).then(async rs => {
                 rs[ANSWER_RESULT] = true;
-                maps.set(rs, {messages, functions, tool_choice});
+                maps.set(rs, {messages, functions, tool_choice, salt});
 
                 //执行函数链的调用
                 if (rs[0].finish_reason === 'tool_calls') {
@@ -98,9 +101,10 @@ const use_chat = (...args) =>
                     for (const {message} of rs) {
                         for (const req of message.tool_calls) {
                             const {path, name, call} = use_functions[req.function.name];
-                            call_result = await Promise.resolve(call(require(path)[name], JSON.parse(req.function.arguments)))
+                            call_result = await Promise.resolve(call($require(path)[name], JSON.parse(req.function.arguments)))
                                 .catch(e => e.toString())
                                 .then(res => use_chat(
+                                    ...salt,
                                     functions,
                                     messages,
                                     message,
@@ -108,7 +112,7 @@ const use_chat = (...args) =>
                                         tool_call_id: req.id,
                                         index: req.index,
                                         role: 'tool',
-                                        content: JSON.stringify(res),
+                                        content: JSON.stringify(res === undefined ? null : res),
                                     },
                                 ));
                         }
@@ -145,6 +149,7 @@ const sys_say = (...content) =>
  */
 const use_content = input => {
     const res = [];
+
     for (const {message: {content}} of input) res.push(content);
     return res.join('\r\n');
 }
@@ -238,7 +243,7 @@ const use_functions = async (path, env) => {
                         }
                         result.push({type: "function", function: body});
                         const args = Object.keys(params).join(','), hash = md5(filename),
-                            name = `${hash}:${fn.key.name}`;
+                            name = `fc_${hash}_${fn.key.name}`;
 
                         use_functions[name] = {
                             name: fn.key.name,

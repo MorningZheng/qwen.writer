@@ -1,9 +1,9 @@
+process.loadEnvFile('.env');
+
 const {use_llm, use_functions, use_chat, user_say, use_trim} = require('./qwen');
 
-
-// use_functions('./tools').then(console.log);
 use_llm({
-    API_KEY: 'sk-587d3552cea74ed28b5fa84fe1ea242b',
+    API_KEY: process.env.API_KEY,
     BASE_URL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     MODEL: ['deepseek-r1-distill-qwen-32b', 'deepseek-v3'],
 })

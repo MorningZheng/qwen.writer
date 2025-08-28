@@ -9,6 +9,6 @@ use_llm({
 })
     .then(() => use_chat(
         use_functions('./tools'),
-        user_say('遍历data目录下的所有文件，包括子文件夹。以json格式输出'),
+        user_say('遍历.data目录下的所有文件，包括子文件夹。'),
     ))
     .then(console.log);

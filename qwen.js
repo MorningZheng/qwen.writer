@@ -70,6 +70,7 @@ const use_chat = (...args) =>
             if (functions.length) Object.assign(req, {
                 model: use_env.MODEL[1] ?? use_env.MODEL[0],
                 tools: functions,
+                parallel_tool_calls: false,
                 tool_choice,
             });
             const body = JSON.stringify(req);
@@ -86,7 +87,7 @@ const use_chat = (...args) =>
                 })
                     .then(res => res.json())
                     .then(res => {
-                        if (res.error) throw Object.assign(new Error(res.error.messages), res.error);
+                        if (res.error) throw Object.assign(new Error(res.error.message ?? res.error.messages), res.error);
                         else return fs.mkdir(dirname(filename), {recursive: true})
                             .then(() => fs.writeFile(filename, yaml.stringify({salt, req, res}, null, 4)))
                             .then(() => res.choices);
@@ -96,28 +97,30 @@ const use_chat = (...args) =>
                 maps.set(rs, {messages, functions, tool_choice, salt});
 
                 //执行函数链的调用
-                if (rs[0].finish_reason === 'tool_calls') {
-                    let call_result;
+                if (rs.some(i => i.finish_reason === 'tool_calls')) {
+                    const called = [];
                     for (const {message} of rs) {
+                        called.push(message);
                         for (const req of message.tool_calls) {
                             const {path, name, call} = use_functions[req.function.name];
-                            call_result = await Promise.resolve(call($require(path)[name], JSON.parse(req.function.arguments)))
+                            console.log('Call', path, name, req.function.arguments);
+                            called.push(await Promise.resolve(call($require(path)[name], JSON.parse(req.function.arguments)))
                                 .catch(e => e.toString())
-                                .then(res => use_chat(
-                                    ...salt,
-                                    functions,
-                                    messages,
-                                    message,
-                                    {
-                                        tool_call_id: req.id,
-                                        index: req.index,
-                                        role: 'tool',
-                                        content: JSON.stringify(res === undefined ? null : res),
-                                    },
-                                ));
+                                .then(res => ({
+                                    tool_call_id: req.id,
+                                    index: req.index,
+                                    role: 'tool',
+                                    content: JSON.stringify(res ?? null),
+                                })),
+                            );
                         }
                     }
-                    return call_result;
+                    return use_chat(
+                        ...Array.isArray(salt) ? salt : [salt],
+                        functions,
+                        messages,
+                        ...called,
+                    );
                 }
 
                 return rs;
@@ -242,13 +245,15 @@ const use_functions = async (path, env) => {
                             }
                         }
                         result.push({type: "function", function: body});
-                        const args = Object.keys(params).join(','), hash = md5(filename),
+                        const hash = md5(filename),
                             name = `fc_${hash}_${fn.key.name}`;
+                        const args = Object.keys(params).join(','),
+                            expose = new Function(`{${args}}`, `return [${args}]`);
 
                         use_functions[name] = {
                             name: fn.key.name,
                             path: filename,
-                            call: new Function('env', `return (fn,{${args}})=>fn.call(env,${args})`)(env),//允许导入env，使用this访问
+                            call: (fn, arg) => fn.call(env, ...expose(arg)),
                         };
                         Object.assign(body, {
                             name,

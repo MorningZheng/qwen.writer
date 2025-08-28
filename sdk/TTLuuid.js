@@ -1,4 +1,4 @@
-const {v5, validate} = require('uuid');
+const {v5, validate,v4} = require('uuid');
 const crypto = require("crypto");
 
 const v5tov4 = (uuid5) => {
@@ -60,7 +60,8 @@ const use_ttl_uuid = (name_space, default_ms = 10 * 1000) => {
     };
 
     const use = data => {
-        const uid = v5tov4(v5(data.constructor === String ? data : JSON.stringify(data), name_space ?? v5.DNS));
+        // const uid = v5tov4(v5(data.constructor === String ? data : JSON.stringify(data), name_space ?? v5.DNS));
+        const uid = v4();
         if (!store.has(data)) set(data, uid);
         return store.get(data);
     }
@@ -79,7 +80,7 @@ const use_ttl_uuid = (name_space, default_ms = 10 * 1000) => {
     return expose
 }
 
-module.exports = use_ttl_uuid
+module.exports = use_ttl_uuid;
 
 // // 使用示例
 // const cache = createTTLMap(5000)

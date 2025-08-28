@@ -110,12 +110,18 @@ module.exports = (app_id, app_secret, expired_delay = 0.1 * 60 * 1000) => {
      * @returns {Promise<object|null>} 节点信息（node）或 null
      */
     const get_node_info = url => {
-        const re = /\bwiki\/(\w+)$/.exec((url.constructor === String ? URL.parse(url) : url).pathname);
+        const re = /\b(wiki|base)\/(\w+)$/.exec((url.constructor === String ? URL.parse(url) : url).pathname);
         if (!re) return Promise.resolve(null);
+
+        if(re[1]==='base') return use_bearer({
+            path: {
+                app_token: re[2],
+            },
+        }).with(client.bitable.v1.app.get).then(rs => rs.app);
 
         return use_bearer({
             params: {
-                token: re[1],
+                token: re[2],
                 obj_type: 'wiki',
             },
         }).with(client.wiki.v2.space.getNode).then(rs => rs.node);
@@ -227,7 +233,7 @@ module.exports = (app_id, app_secret, expired_delay = 0.1 * 60 * 1000) => {
      */
     const use_table = async url => {
         const u = URL.parse(url), info = await get_node_info(u);
-        const book = use_bit(info.obj_token);
+        const book = use_bit(info.obj_token??info.app_token);
         return {
             book,
             table: book.use_table(u.searchParams.get('table') ?? await book.get_tables()
@@ -240,7 +246,7 @@ module.exports = (app_id, app_secret, expired_delay = 0.1 * 60 * 1000) => {
     /**
      * 群聊能力封装：信息、菜单、配置、发送与拉取消息
      * @param {string} chat_id 群聊 ID
-     * @returns {{chat_id:string, get_info:function, get_menu:function, get_config:function, send_msg:function, get_messages:function}}
+     * @returns {{chat_id:string, get_info:function, get_menu:function, get_config:function, send_msg:function, get_messages:function,get_tabs:function}}
      */
     const use_chat = chat_id => {
         const uuid = use_ttl_uuid(chat_id);
@@ -262,12 +268,14 @@ module.exports = (app_id, app_secret, expired_delay = 0.1 * 60 * 1000) => {
              * 将群菜单转换为 {名称: URL} 配置映射
              * @returns {Promise<Record<string,string>>}
              */
-            get_config: () => expose.get_menu().then(menu => {
-                const data = {};
-                for (const {chat_menu_item: {name, redirect_link: {common_url: url}}} of menu.chat_menu_top_levels) {
-                    data[name] = url.slice(0, 4).toLowerCase() === 'ftp:' ? url.slice(4) : url;
+            get_config: () => expose.get_tabs().then(tabs => {
+                const data = {},todo=[];
+                for(const {tab_content: {doc},tab_type:type,tab_name:name} of tabs){
+                    if(type!=='doc')continue;
+                    if(name.toLowerCase().endsWith('.yaml'))todo.push(use_fs(doc).read_yaml().then(config=>Object.assign(data,{config})));
+                    else todo.push(use_table(doc).then(r=>Object.assign(data,r)));
                 }
-                return data;
+                return Promise.all(todo).then(()=>data);
             }),
             /**
              * 向群发送消息
@@ -303,7 +311,8 @@ module.exports = (app_id, app_secret, expired_delay = 0.1 * 60 * 1000) => {
                     page_size: Number.isInteger(page_token) ? page_token : 20,
                     page_token,
                 },
-            }).with(client.im.v1.message.list),
+            }).with(client.im.v1.message.list).then(r=>r.items),
+            get_tabs:()=> use_bearer({path: {chat_id}}).with(client.im.v1.chatTab.listTabs).then(r=>r.chat_tabs),
         };
 
         return expose;

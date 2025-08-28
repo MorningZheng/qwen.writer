@@ -53,7 +53,7 @@ writer
    前往以下地址申请：  
    https://help.aliyun.com/zh/model-studio/get-api-key?spm=a2c4g.11186623.0.i2
 
-4. **配置��境变量**  
+4. **配置环境变量**  
    在项目根目录新建 `.env.yaml`，内容如下：
    ```yaml
    qwen:

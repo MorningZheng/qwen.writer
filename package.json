@@ -12,6 +12,9 @@
     "@babel/parser": "^7.28.0",
     "@larksuiteoapi/node-sdk": "^1.37.0",
     "comment-parser": "^1.4.1",
+    "json5": "^2.2.3",
+    "pdf-parse": "^1.1.1",
+    "pdfjs-dist": "^5.4.149",
     "uuid": "^11.1.0",
     "yaml": "^2.8.0"
   }

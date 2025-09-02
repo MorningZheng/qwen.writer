@@ -51,11 +51,12 @@ const use_chat = (...args) =>
     Promise.all(args.map(i => i?.[ANSWER_RESULT] ? use_assistant(i) : i))
         .then(input => {
             const messages = [], functions = [], salt = [];
-            let tool_choice = undefined;
+            let tool_choice = undefined, model;
             (function walk(rows) {
                 for (const item of rows) {
                     if (!item) continue;
                     if (Array.isArray(item)) walk(item);
+                    else if (item.model) model = item.model;
                     else if (item.type === 'function') {
                         if (item.function.hasOwnProperty('description')) functions.push(item);
                         else tool_choice = item;
@@ -64,18 +65,20 @@ const use_chat = (...args) =>
                 }
             })(input);
 
-            /** @type array*/
-            console.log(`\x1b[33m${messages.slice(-1)[0].content?.slice?.(0, 100)}...\x1b[0m`);
-            const req = {model: use_env.MODEL[0], messages, max_tokens: 8192, temperature: 0.7};
+            const req = {model: model ?? use_env.MODEL[0], messages, max_tokens: 8192, temperature: 0.7};
             if (functions.length) Object.assign(req, {
-                model: use_env.MODEL[1] ?? use_env.MODEL[0],
+                model: model ?? use_env.MODEL[1] ?? use_env.MODEL[0],
                 tools: functions,
                 parallel_tool_calls: false,
                 tool_choice,
             });
-            const body = JSON.stringify(req);
+            const body = JSON.stringify(req), hash = md5(body, ...salt);
 
-            const filename = join(entry.dir, set_cache.__path ?? '.cache', `${md5(body, ...salt)}.yaml`);
+            const filename = join(entry.dir, set_cache.__path ?? '.cache', `${hash}.yaml`);
+            console.log('cache', filename);
+            /** @type array*/
+            console.log(`\x1b[33m${messages.slice(-1)[0].content?.slice?.(0, 100)}...\x1b[0m`);
+
             return fs.readFile(filename, 'utf-8').then(t => yaml.parse(t).res.choices).catch(e =>
                 fetch(`${use_env.BASE_URL}/chat/completions`, {
                     method: 'POST',
@@ -154,7 +157,7 @@ const use_content = input => {
     const res = [];
 
     for (const {message: {content}} of input) res.push(content);
-    return res.join('\r\n');
+    return res.join('\r\n').trim();
 }
 
 /**

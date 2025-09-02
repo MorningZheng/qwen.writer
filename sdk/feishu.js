@@ -4,6 +4,7 @@ const {join} = require("path");
 const crypto = require("crypto");
 const {promises: fs} = require('fs');
 const use_ttl_uuid = require('./TTLuuid');
+const {from} = require("form-data");
 
 /**
  * 计算多个字符串拼接后的 MD5 十六进制摘要
@@ -48,7 +49,7 @@ const types = [
  * @param {number} [expired_delay=6000] 令牌过期提前量（毫秒）（当前实现未使用，占位参数）
  * @returns {object} 封装的 API 访问器集合
  */
-module.exports = (app_id, app_secret, expired_delay = 0.1 * 60 * 1000) => {
+module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000) => {
 
     const client = new lark.Client({
         appId: app_id,
@@ -63,7 +64,7 @@ module.exports = (app_id, app_secret, expired_delay = 0.1 * 60 * 1000) => {
     const get_token = async () => {
         const key = md5(`sloane::${app_id}=${app_secret}`);
         if (!token_cache.has(key)) {
-            const filename = join(process.env.TMP ?? require('os').tmpdir(), `sloane.lark.${md5(key)}.json`);
+            const filename = join(temp_dir ?? process.env.TMP ?? require('os').tmpdir(), `sloane.lark.${md5(key)}.json`);
             token_cache.set(key, {
                 filename,
                 data: await fs.readFile(filename, 'utf8').then(JSON.parse).catch(e => null),
@@ -113,7 +114,7 @@ module.exports = (app_id, app_secret, expired_delay = 0.1 * 60 * 1000) => {
         const re = /\b(wiki|base)\/(\w+)$/.exec((url.constructor === String ? URL.parse(url) : url).pathname);
         if (!re) return Promise.resolve(null);
 
-        if(re[1]==='base') return use_bearer({
+        if (re[1] === 'base') return use_bearer({
             path: {
                 app_token: re[2],
             },
@@ -233,7 +234,7 @@ module.exports = (app_id, app_secret, expired_delay = 0.1 * 60 * 1000) => {
      */
     const use_table = async url => {
         const u = URL.parse(url), info = await get_node_info(u);
-        const book = use_bit(info.obj_token??info.app_token);
+        const book = use_bit(info.obj_token ?? info.app_token);
         return {
             book,
             table: book.use_table(u.searchParams.get('table') ?? await book.get_tables()
@@ -241,6 +242,99 @@ module.exports = (app_id, app_secret, expired_delay = 0.1 * 60 * 1000) => {
                 .then(f => f.value.table_id)),
         }
     };
+
+    const use_doc = async id => {
+
+        // const document_id = id.startsWith('http') ? await get_node_info(URL.parse(id)).then(r => r.obj_token) : id;
+
+        const  document_id='Y81gdJRFjoBxfdx27PMcj6Gtnhe';
+
+        // process.exit();
+        const use_convert = (from, content, offset) => get_token().then(token => lark.withTenantToken(token))
+            .then(access => client.docx.v1.document.convert(
+                    {
+                        params: {user_id_type: 'open_id'},
+                        data: {content_type: from, content},
+                    },
+                    access,
+                ).then(r => client.docx.v1.documentBlockDescendant.create({
+                    path: {document_id, block_id: document_id},
+                    params: {document_revision_id: -1, user_id_type: 'open_id'},
+                    data: {
+                        index: offset,
+                        children_id: r.data.first_level_block_ids,
+                        descendants: r.data.blocks.map(i => Object.assign(i, {parent_id: undefined})),
+                    }
+                }, access))
+            );
+
+        return {
+            document_id,
+            get types(){
+                return doc_types;
+            },
+            ls: () => use_bearer({
+                path: {
+                    document_id,
+                },
+                params: {page_size: 500, document_revision_id: -1},
+            }).with(client.docx.v1.documentBlock.list).then(r => r.items),
+            from_html: (content, offset) => use_convert('html', content, offset),
+            from_md: (content, offset) => use_convert('markdown', content, offset),
+            /**
+             * @returns {Promise<string>}
+             */
+            to_html: () => use_bearer({
+                path: {
+                    document_id,
+                },
+                params: {page_size: 500, document_revision_id: -1},
+            }).with(client.docx.v1.documentBlock.list).then(r => {
+                const root = {};
+                for (const node of r.items) {
+                    if (node.block_type === 1) Object.assign(root, node);
+                    else root[node.block_id] = node;
+                }
+
+                (function walk(node) {
+                    if (Array.isArray(node.children))
+                        for (const i in node.children) {
+                            const id = node.children[i];
+                            node.children[i] = walk(root[id]);
+                        }
+                    return node;
+                })(root);
+
+                const dom = (function walk(children) {
+                    const rs = [];
+                    for (const node of children) {
+                        const type = doc_types.get(node.block_type);
+                        if (type) {
+                            const {md,tag} = type;
+                            rs.push(`<${tag}>`);
+                            if (node[md]?.elements) {
+                                for (const el of walk(node[md]?.elements)) {
+                                    rs.push(el);
+                                }
+                            }
+                            if (node.children) {
+                                const nodes = walk(node.children);
+                                if (['ol', 'ul'].includes(tag)) {
+                                    rs.push('<li>',...nodes,'</li>');
+                                }else rs.push(...nodes);
+                            }
+
+                            rs.push(`</${tag}>`);
+                        } else rs.push(`<p>${node.text_run.content}</p>`);
+                    }
+                    return rs;
+                })(root.children);
+                dom.unshift('<html lang="zh">','<body>');
+                dom.push('</body>','</html>');
+                return dom.join('\n');
+            }),
+        }
+    }
 
 
     /**
@@ -269,13 +363,13 @@ module.exports = (app_id, app_secret, expired_delay = 0.1 * 60 * 1000) => {
              * @returns {Promise<Record<string,string>>}
              */
             get_config: () => expose.get_tabs().then(tabs => {
-                const data = {},todo=[];
-                for(const {tab_content: {doc},tab_type:type,tab_name:name} of tabs){
-                    if(type!=='doc')continue;
-                    if(name.toLowerCase().endsWith('.yaml'))todo.push(use_fs(doc).read_yaml().then(config=>Object.assign(data,{config})));
-                    else todo.push(use_table(doc).then(r=>Object.assign(data,r)));
+                const data = {}, todo = [];
+                for (const {tab_content: {doc}, tab_type: type, tab_name: name} of tabs) {
+                    if (type !== 'doc') continue;
+                    if (name.toLowerCase().endsWith('.yaml')) todo.push(use_fs(doc).read_yaml().then(config => Object.assign(data, {config})));
+                    else todo.push(use_table(doc).then(r => Object.assign(data, r)));
                 }
-                return Promise.all(todo).then(()=>data);
+                return Promise.all(todo).then(() => data);
             }),
             /**
              * 向群发送消息
@@ -311,8 +405,8 @@ module.exports = (app_id, app_secret, expired_delay = 0.1 * 60 * 1000) => {
                     page_size: Number.isInteger(page_token) ? page_token : 20,
                     page_token,
                 },
-            }).with(client.im.v1.message.list).then(r=>r.items),
-            get_tabs:()=> use_bearer({path: {chat_id}}).with(client.im.v1.chatTab.listTabs).then(r=>r.chat_tabs),
+            }).with(client.im.v1.message.list).then(r => r.items),
+            get_tabs: () => use_bearer({path: {chat_id}}).with(client.im.v1.chatTab.listTabs).then(r => r.chat_tabs),
         };
 
         return expose;
@@ -472,10 +566,10 @@ module.exports = (app_id, app_secret, expired_delay = 0.1 * 60 * 1000) => {
         // 鉴权与通用
         lark,
         client,
-        use_ws(hooks,params={}){
+        use_ws(hooks, params = {}) {
             return new lark.WSClient({
-                appId: process.env.FEISHU_ID,
-                appSecret: process.env.FEISHU_SECRET,
+                appId: app_id,
+                appSecret: app_secret,
             }).start({eventDispatcher: new lark.EventDispatcher(params).register(hooks)});
         },
         get_token,
@@ -483,6 +577,7 @@ module.exports = (app_id, app_secret, expired_delay = 0.1 * 60 * 1000) => {
         // Wiki & Bitable
         get_node_info,
         use_bit,
+        use_doc,
         use_table,
 
         // IM
@@ -498,3 +593,60 @@ module.exports = (app_id, app_secret, expired_delay = 0.1 * 60 * 1000) => {
         get_user,
     }
 }
+
+
+const doc_types = new Map();
+for (const item of [
+    {"md": "page", "val": 1, "tag": "div"},
+    {"md": "text", "val": 2, "tag": "p"},
+    {"md": "heading1", "val": 3, "tag": "h1"},
+    {"md": "heading2", "val": 4, "tag": "h2"},
+    {"md": "heading3", "val": 5, "tag": "h3"},
+    {"md": "heading4", "val": 6, "tag": "h4"},
+    {"md": "heading5", "val": 7, "tag": "h5"},
+    {"md": "heading6", "val": 8, "tag": "h6"},
+    {"md": "heading7", "val": 9, "tag": "h6"},
+    {"md": "heading8", "val": 10, "tag": "h6"},
+    {"md": "heading9", "val": 11, "tag": "h6"},
+    {"md": "bullet", "val": 12, "tag": "ul"},
+    {"md": "ordered", "val": 13, "tag": "ol"},
+    {"md": "code", "val": 14, "tag": "pre"},
+    {"md": "quote", "val": 15, "tag": "blockquote"},
+    {"md": "todo", "val": 17, "tag": "input"},
+    {"md": "bitable", "val": 18, "tag": "table"},
+    {"md": "callout", "val": 19, "tag": "aside"},
+    {"md": "chat_card", "val": 20, "tag": "section"},
+    {"md": "diagram", "val": 21, "tag": "svg"},
+    {"md": "divider", "val": 22, "tag": "hr"},
+    {"md": "file", "val": 23, "tag": "a"},
+    {"md": "grid", "val": 24, "tag": "div"},
+    {"md": "grid_column", "val": 25, "tag": "div"},
+    {"md": "iframe", "val": 26, "tag": "iframe"},
+    {"md": "image", "val": 27, "tag": "img"},
+    {"md": "isv", "val": 28, "tag": "embed"},
+    {"md": "mindnote", "val": 29, "tag": "section"},
+    {"md": "sheet", "val": 30, "tag": "table"},
+    {"md": "table", "val": 31, "tag": "table"},
+    {"md": "table_cell", "val": 32, "tag": "td"},
+    {"md": "view", "val": 33, "tag": "div"},
+    {"md": "quote_container", "val": 34, "tag": "blockquote"},
+    {"md": "task", "val": 35, "tag": "li"},
+    {"md": "okr", "val": 36, "tag": "section"},
+    {"md": "okr_objective", "val": 37, "tag": "h3"},
+    {"md": "okr_key_result", "val": 38, "tag": "li"},
+    {"md": "okr_progress", "val": 39, "tag": "progress"},
+    {"md": "add_ons", "val": 40, "tag": "div"},
+    {"md": "jira_issue", "val": 41, "tag": "section"},
+    {"md": "wiki_catalog", "val": 42, "tag": "nav"},
+    {"md": "board", "val": 43, "tag": "section"},
+    {"md": "agenda", "val": 44, "tag": "section"},
+    {"md": "agenda_item", "val": 45, "tag": "li"},
+    {"md": "agenda_item_title", "val": 46, "tag": "h4"},
+    {"md": "agenda_item_content", "val": 47, "tag": "p"},
+    {"md": "link_preview", "val": 48, "tag": "a"},
+    {"md": "source_synced", "val": 49, "tag": "section"},
+    {"md": "reference_synced", "val": 50, "tag": "section"},
+    {"md": "sub_page_list", "val": 51, "tag": "ul"},
+    {"md": "ai_template", "val": 52, "tag": "template"},
+    {"md": "undefined", "val": 999, "tag": "div"}
+]) doc_types.set(item.md, item).set(item.val, item);

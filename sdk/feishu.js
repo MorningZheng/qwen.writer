@@ -501,7 +501,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
     /**
      * 消息级操作封装（转发、撤回、回复）
      * @param {string} msg_id 消息 ID
-     * @returns {{forward:function, revoke:function, reply:function}}
+     * @returns {{forward:function, revoke:function, reply:function, read:function}}
      */
     const use_msg = msg_id => {
         return {
@@ -525,8 +525,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
              * 撤回消息
              * @returns {Promise<object>}
              */
-            revoke: () => use_bearer({path: {msg_id}})
-                .with(client.im.v1.message.revoke),
+            revoke: () => use_bearer({path: {msg_id}}).with(client.im.v1.message.revoke),
             /**
              * 回复消息（线程内）
              * @param {object} data 回复内容
@@ -538,7 +537,14 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
                     ...data,
                     reply_in_thread: true,
                 },
-            }).with(client.im.v1.message.reply)
+            }).with(client.im.v1.message.reply),
+            read: () => use_bearer({
+                path: {message_id: msg_id},
+                params: {user_id_type: 'open_id'},
+            }).with(client.im.v1.message.get).then(r=>r.items.map(i=>{
+                if(i.msg_type==='text')i.body.content=JSON.parse(i.body.content);
+                return i;
+            })),
         }
     }
 
@@ -561,7 +567,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
             department_id_type: 'department_id',
             user_id_type: 'user_id',
         },
-    }).with(client.contact.v3.user.get);
+    }).with(client.contact.v3.user.get).then(r => r.user);
 
     // 按功能域组织（仅顺序优化，保持实现不变）
     // 1) 鉴权与通用：client, get_token, use_bearer
@@ -602,14 +608,14 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
         fields_type,
         get_user,
 
-        send_msg: (id,data, receive_id_type) => {
+        send_msg: (id, data, receive_id_type) => {
             return use_bearer({
                 params: {
                     receive_id_type,
                 },
                 data: {
                     receive_id: id,
-                    msg_type:'text',
+                    msg_type: 'text',
                     content: JSON.stringify(data.constructor === String ? {text: data} : data),
                 },
             }).with(client.im.v1.message.create);

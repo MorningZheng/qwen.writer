@@ -1,7 +1,6 @@
-process.loadEnvFile('.env');
 // 引入自定义的qwen模块，包含与大模型交互的各种工具函数
 const {
-    use_llm,         // 初始化大模型API
+    use_env,         // 初始化大模型API
     use_chat,        // 用于与大模型进行多轮对话
     system_say,      // 系统角色发言
     user_say,        // 用户角色发言
@@ -11,9 +10,9 @@ const {
     use_functions    // 加载自定义函数工具
 } = require('./qwen');
 
+
 // 初始化大模型API，配置API_KEY、接口地址和模型列表
-use_llm({
-    API_KEY: process.env.API_KEY,
+use_env({
     BASE_URL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     MODEL: ['deepseek-r1-distill-qwen-32b', 'deepseek-v3'],
 })
@@ -36,7 +35,7 @@ use_llm({
     ))
     // 第四步：继续多轮对话，正式生成不在港说明正文
     .then(memory => use_chat(
-        memory, // 传递前文��下文
+        memory, // 传递前文结果下文
         user_say(
             use_trim(`
             # 任务描述

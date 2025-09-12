@@ -111,8 +111,10 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
      * @returns {Promise<object|null>} 节点信息（node）或 null
      */
     const get_node_info = url => {
-        const re = /\b(wiki|base)\/(\w+)$/.exec((url.constructor === String ? URL.parse(url) : url).pathname);
+        const re = /\b(wiki|base|docx)\/(\w+)$/.exec((url.constructor === String ? URL.parse(url) : url).pathname);
         if (!re) return Promise.resolve(null);
+
+        if (re[1] === 'docx') return Promise.resolve(re[2]);
 
         if (re[1] === 'base') return use_bearer({
             path: {
@@ -244,10 +246,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
     };
 
     const use_doc = async id => {
-
-        // const document_id = id.startsWith('http') ? await get_node_info(URL.parse(id)).then(r => r.obj_token) : id;
-
-        const  document_id='Y81gdJRFjoBxfdx27PMcj6Gtnhe';
+        const document_id = id.startsWith('http') ? await get_node_info(URL.parse(id)).then(r => r.obj_token ?? r) : id;
 
         // process.exit();
         const use_convert = (from, content, offset) => get_token().then(token => lark.withTenantToken(token))
@@ -270,7 +269,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 
         return {
             document_id,
-            get types(){
+            get types() {
                 return doc_types;
             },
             ls: () => use_bearer({
@@ -310,7 +309,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
                     for (const node of children) {
                         const type = doc_types.get(node.block_type);
                         if (type) {
-                            const {md,tag} = type;
+                            const {md, tag} = type;
                             rs.push(`<${tag}>`);
                             if (node[md]?.elements) {
                                 for (const el of walk(node[md]?.elements)) {
@@ -320,8 +319,8 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
                             if (node.children) {
                                 const nodes = walk(node.children);
                                 if (['ol', 'ul'].includes(tag)) {
-                                    rs.push('<li>',...nodes,'</li>');
-                                }else rs.push(...nodes);
+                                    rs.push('<li>', ...nodes, '</li>');
+                                } else rs.push(...nodes);
                             }
 
                             rs.push(`</${tag}>`);
@@ -329,8 +328,8 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
                     }
                     return rs;
                 })(root.children);
-                dom.unshift('<html lang="zh">','<body>');
-                dom.push('</body>','</html>');
+                dom.unshift('<html lang="zh">', '<body>');
+                dom.push('</body>', '</html>');
                 return dom.join('\n');
             }),
         }
@@ -388,6 +387,16 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
                     uuid: uuid.use(data),
                 },
             }).with(client.im.v1.message.create),
+            reply_msg: (msg_id, data, msg_type) => use_bearer({
+                path: {
+                    message_id: msg_id,
+                },
+                data: {
+                    content: JSON.stringify(data.constructor === String ? {text: data} : data),
+                    msg_type: 'text',
+                    reply_in_thread: false,
+                },
+            }).with(client.im.v1.message.reply),
             /**
              * 拉取群消息列表
              * @param {number|Date} [start] 起始时间（毫秒时间戳或 Date）
@@ -573,6 +582,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
             }).start({eventDispatcher: new lark.EventDispatcher(params).register(hooks)});
         },
         get_token,
+        use_bearer,
 
         // Wiki & Bitable
         get_node_info,
@@ -591,6 +601,19 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
         // 其他
         fields_type,
         get_user,
+
+        send_msg: (id,data, receive_id_type) => {
+            return use_bearer({
+                params: {
+                    receive_id_type,
+                },
+                data: {
+                    receive_id: id,
+                    msg_type:'text',
+                    content: JSON.stringify(data.constructor === String ? {text: data} : data),
+                },
+            }).with(client.im.v1.message.create);
+        },
     }
 }
 

@@ -8,5 +8,7 @@ use_env('.env',{
         use_functions('./tools'),
         user_say('遍历sdk目录下的所有文件，包括子文件夹。'),
     ))
-    .then(use_content)
+    .then(res=>{
+        return use_content(res)
+    })
     .then(console.log);

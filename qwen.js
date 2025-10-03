@@ -47,6 +47,10 @@ const use_env = (...inputs) => Promise.all(inputs.map(input => input.constructor
  * @returns {Function} set_cache 本身。
  */
 const set_cache = path => Object.assign(set_cache, {__value: path});
+const get_cache=()=>{
+    const val=set_cache.__value??'.cache';
+    return val=== resolve(val)?val:resolve(entry.dir, val);
+}
 
 /**
  * 设置 prompt 文件夹路径。
@@ -142,7 +146,7 @@ const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === Stri
         const messages = [], functions = [], options = {
             model: null, max_tokens: 8192, temperature: 0.7,
             enable_thinking: false,
-            cache_path: set_cache.__value ?? '.cache',
+            cache_path: get_cache(),
             BASE_URL: use_env.__value.BASE_URL,
             [Symbol.for('inject')]: undefined,
         };
@@ -178,13 +182,13 @@ const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === Stri
             );
 
         const hash = md5([messages, functions, options, req.model].map(i => JSON.stringify(i)).join('\n'));
-        const filename = join(entry.dir, options.cache_path, `${hash}.yaml`);
-        console.log('Cache', filename);
+
+        const cache_path = join(options.cache_path, `${hash}.yaml`);
+        console.log('Cache', cache_path);
 
         const [{content}] = messages.slice(-1);
-        console.log(`\x1b[33mAsking:${content.length > 100 ? `${content.slice?.(0, 100)}...` : content}\x1b[0m`);
-
-        return fs.readFile(filename, 'utf-8')
+        console.log(`\x1b[33mAsking :${content.length > 100 ? `${content.slice(0, 100)}...` : content}\x1b[0m`);
+        return fs.readFile(cache_path, 'utf-8')
             .then(t => yaml.parse(t).res)
             .catch(e => fetch(`${options.BASE_URL}/chat/completions`, {
                     method: 'POST',
@@ -197,8 +201,8 @@ const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === Stri
                     .then(res => res.json())
                     .then(res => {
                         if (res.error) throw Object.assign(new Error(res.error.message ?? res.error.messages), res.error);
-                        return fs.mkdir(dirname(filename), {recursive: true})
-                            .then(() => fs.writeFile(filename, yaml.stringify({
+                        return fs.mkdir(dirname(cache_path), {recursive: true})
+                            .then(() => fs.writeFile(cache_path, yaml.stringify({
                                 time: new Date().toLocaleString(),
                                 req,
                                 res
@@ -217,16 +221,18 @@ const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === Stri
                             called.push(item.message);
                             for (const req of item.message.tool_calls) {
                                 const {path, name, call} = functions[req.function.name][Symbol.for('callee')];
-                                console.log('Require',path,name);
-                                called.push(await Promise.resolve(call($require(path)[name], options[Symbol.for('inject')], JSON.parse(req.function.arguments)))
-                                    .catch(e => e.toString())
+                                console.log('Require', path, name);
+
+                                const rs=await Promise.resolve(call($require(path)[name], options[Symbol.for('inject')], JSON.parse(req.function.arguments)))
+                                    .catch(e => e)
                                     .then(res => ({
                                         tool_call_id: req.id,
                                         index: req.index,
                                         role: 'tool',
                                         content: JSON.stringify(res ?? null),
-                                    })),
-                                );
+                                    }));
+                                if(rs instanceof Error) throw rs;
+                                called.push(rs);
                             }
                         }
                     }
@@ -244,105 +250,108 @@ const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === Stri
  * @returns {Promise<Array>} 函数描述对象数组。
  */
 const use_functions = (path, inject = null) =>
-    Promise.all((Array.isArray(path)?path:[path]).map(p=>fs.readdir(p, {withFileTypes: true, recursive: false}).catch(e=>[])))
-    // fs.readdir(path, {withFileTypes: true, recursive: false})
-    .then(async rs => {
-        const [key] = Object.getOwnPropertySymbols(rs[0]).filter(s => s.description === 'type');
+    Promise.all((Array.isArray(path) ? path : [path]).map(p => fs.readdir(p, {
+        withFileTypes: true,
+        recursive: false
+    }).catch(e => [])))
+        // fs.readdir(path, {withFileTypes: true, recursive: false})
+        .then(async rs => {
+            const [key] = Object.getOwnPropertySymbols(rs[0]).filter(s => s.description === 'type');
 
-        const dirs = new Set(), libs = [];
-        for (const f of rs.flatMap(i=>i)) { //排序后再处理，文件夹优先
-            const {name} = f,path=f.parentPath??f.path;
-            const filename = path.slice(0, -join(path).length) + join(path, name);
+            const dirs = new Set(), libs = [];
+            for (const f of rs.flatMap(i => i)) { //排序后再处理，文件夹优先
+                const {name} = f, path = f.parentPath ?? f.path;
+                const filename = path.slice(0, -join(path).length) + join(path, name);
 
-            if (f.isDirectory()) {
-                // dirs.add(filename);
-                for(const name of ['main','index','export','expose']){
-                    const entry=join(filename, name)+'.js';
-                    if(await fs.stat(entry).then(()=>false).catch(()=>true))continue;
-                    libs.push({
-                        standalone: false,
-                        filename:entry,
-                        dir:filename,
-                    });
-                    break;
-                }
-            } else if(/\.js$/i.test(name)) {
-                libs.push({
-                    standalone: true,
-                    filename,
-                    dir:f.parentPath??f.path,
-                });
-            }
-        }
-
-        const result = [], field = Symbol.for('callee');
-        // const info = [], memo = {};
-        for (const {filename, standalone, dir} of libs) {
-            const text = await fs.readFile(filename, 'utf-8'), hash = md5(text);
-
-            for (const node of babel.parse(await fs.readFile(filename, {encoding: 'utf-8'}), {
-                sourceType: 'module',
-                plugins: ['typescript', 'jsx'],
-                ranges: true,
-                tokens: true
-            }).program.body) {
-                if (node.type !== 'ExpressionStatement') continue;
-                const {operator, left, right} = node.expression;
-                if (operator !== '=' || left.object?.name !== 'module') continue;
-
-                for (const fn of right?.properties ?? []) {
-                    if (fn.kind !== 'method') continue;
-                    const body = {}, desc = [], params = {}, required = [];
-
-                    for (const p of fn.params) {
-                        if (p.type === 'Identifier') {
-                            params[p.name] = {};
-                            required.push(p.name);
-                        } else if (p.type === 'AssignmentPattern') params[p.left.name] = {};
+                if (f.isDirectory()) {
+                    // dirs.add(filename);
+                    for (const name of ['main', 'index', 'export', 'expose']) {
+                        const entry = join(filename, name) + '.js';
+                        if (await fs.stat(entry).then(() => false).catch(() => true)) continue;
+                        libs.push({
+                            standalone: false,
+                            filename: entry,
+                            dir: filename,
+                        });
+                        break;
                     }
+                } else if (/\.js$/i.test(name)) {
+                    libs.push({
+                        standalone: true,
+                        filename,
+                        dir: f.parentPath ?? f.path,
+                    });
+                }
+            }
 
-                    if (!Array.isArray(fn.leadingComments)) continue;
-                    for (const {value} of fn.leadingComments) {
-                        for (const c of comment.parse(`/*${value}*/`)) {
-                            desc.push(c.description);
-                            for (const t of c.tags) {
-                                if (/param/i.test(t.tag))params[t.name] = {
-                                    type: t.type,
-                                    description: t.description,
-                                };
-                                else if (/return/i.test(t.tag))desc.push(`函数运行后返回：${t.name}`);
+            const result = [], field = Symbol.for('callee');
+            // const info = [], memo = {};
+            for (const {filename, standalone, dir} of libs) {
+                const text = await fs.readFile(filename, 'utf-8'), hash = md5(text);
+
+                for (const node of babel.parse(await fs.readFile(filename, {encoding: 'utf-8'}), {
+                    sourceType: 'module',
+                    plugins: ['typescript', 'jsx'],
+                    ranges: true,
+                    tokens: true
+                }).program.body) {
+                    if (node.type !== 'ExpressionStatement') continue;
+                    const {operator, left, right} = node.expression;
+                    if (operator !== '=' || left.object?.name !== 'module') continue;
+
+                    for (const fn of right?.properties ?? []) {
+                        if (fn.kind !== 'method') continue;
+                        const body = {}, desc = [], params = {}, required = [];
+
+                        for (const p of fn.params) {
+                            if (p.type === 'Identifier') {
+                                params[p.name] = {};
+                                required.push(p.name);
+                            } else if (p.type === 'AssignmentPattern') params[p.left.name] = {};
+                        }
+
+                        if (!Array.isArray(fn.leadingComments)) continue;
+                        for (const {value} of fn.leadingComments) {
+                            for (const c of comment.parse(`/*${value}*/`)) {
+                                desc.push(c.description);
+                                for (const t of c.tags) {
+                                    if (/param/i.test(t.tag)) params[t.name] = {
+                                        type: t.type,
+                                        description: t.description,
+                                    };
+                                    else if (/return/i.test(t.tag)) desc.push(`函数运行后返回：${t.name}`);
+                                }
                             }
                         }
-                    }
 
-                    const name = `fc_${md5(hash,fn.key.name)}`,
-                        args = Object.keys(params).join(','),
-                        expose = new Function(`{${args}}`, `return [${args}]`);
-                    Object.assign(body, {
-                        name,
-                        description: desc.join('\n'),
-                        parameters: {
-                            type: "object",
-                            properties: params,
-                            [required.length ? 'required' : Symbol('required')]: required,
-                        },
-                    });
-                    result.push({
-                        type: "function", function: body,
-                        [field]: {
-                            name: fn.key.name,
-                            path: resolve(filename),
-                            call: (fn, env = inject, arg) => {
-                                console.log('Call', filename, name, arg, env);
-                                return fn.call(env, ...expose(arg))
+                        const name = `fc_${md5(hash, fn.key.name)}`,
+                            args = Object.keys(params).join(','),
+                            expose = new Function(`{${args}}`, `return [${args}]`);
+                        Object.assign(body, {
+                            name,
+                            description: desc.join('\n'),
+                            parameters: {
+                                type: "object",
+                                properties: params,
+                                [required.length ? 'required' : Symbol('required')]: required,
                             },
-                        }
-                    });
+                        });
+                        result.push({
+                            type: "function", function: body,
+                            [field]: {
+                                name: fn.key.name,
+                                path: resolve(filename),
+                                call: (fn, env = inject, arg) => {
+                                    console.log('Call', filename, name, arg, env);
+                                    return fn.call(env, ...expose(arg))
+                                },
+                            }
+                        });
+                    }
                 }
             }
-        }
-        return result;
-    });
+            return result;
+        });
 
 const use_inject = value => ({inject: value});
 const use_salt = value => ({salt: value});

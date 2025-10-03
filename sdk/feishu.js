@@ -4,7 +4,7 @@ const {join} = require("path");
 const crypto = require("crypto");
 const {promises: fs} = require('fs');
 const use_ttl_uuid = require('./TTLuuid');
-const {from} = require("form-data");
+// const {from} = require("form-data");
 
 /**
  * 计算多个字符串拼接后的 MD5 十六进制摘要
@@ -46,6 +46,7 @@ const types = [
  * 创建飞书 API 辅助客户端，封装鉴权、Wiki/Bitable、IM、Drive 等常用能力
  * @param {string} app_id 应用 App ID
  * @param {string} app_secret 应用 App Secret
+ * @param {string} temp_dir 缓存目录
  * @param {number} [expired_delay=6000] 令牌过期提前量（毫秒）（当前实现未使用，占位参数）
  * @returns {object} 封装的 API 访问器集合
  */
@@ -111,7 +112,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
      * @returns {Promise<object|null>} 节点信息（node）或 null
      */
     const get_node_info = url => {
-        const re = /\b(wiki|base|docx)\/(\w+)$/.exec((url.constructor === String ? URL.parse(url) : url).pathname);
+        const re = /\b(wiki|base|docx)\/(\w+)$/.exec((url.constructor === String ? new URL(url) : url).pathname);
         if (!re) return Promise.resolve(null);
 
         if (re[1] === 'docx') return Promise.resolve(re[2]);
@@ -225,6 +226,12 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
                         data
                     }).with(client.bitable.v1.appTableField.create)));
                 },
+                get_all: () => use_bearer({
+                    path: {app_token, table_id},
+                    params: {
+                        page_size: 999,
+                    },
+                }).with(client.bitable.v1.appTableRecord.search).then(rs => rs.items),
             }
         },
     });
@@ -235,7 +242,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
      * @returns {Promise<{book:any, table:any}>} Bitable 应用与表访问器
      */
     const use_table = async url => {
-        const u = URL.parse(url), info = await get_node_info(u);
+        const u = new URL(url), info = await get_node_info(u);
         const book = use_bit(info.obj_token ?? info.app_token);
         return {
             book,
@@ -246,7 +253,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
     };
 
     const use_doc = async id => {
-        const document_id = id.startsWith('http') ? await get_node_info(URL.parse(id)).then(r => r.obj_token ?? r) : id;
+        const document_id = id.startsWith('http') ? await get_node_info(new URL(id)).then(r => r.obj_token ?? r) : id;
 
         // process.exit();
         const use_convert = (from, content, offset) => get_token().then(token => lark.withTenantToken(token))
@@ -376,7 +383,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
              * @param {string} [msg_type='text'] 消息类型
              * @returns {Promise<object>}
              */
-            send_msg: (data, msg_type = 'text') => use_bearer({
+            send_msg: (data='', msg_type = 'text') => use_bearer({
                 params: {
                     receive_id_type: 'chat_id',
                 },
@@ -427,7 +434,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
      * @returns {{read_file?:function, read_yaml?:function} | {folder_token:string, ls:function, use_hash:function}}
      */
     const use_fs = url => {
-        const [, type, token] = /\b(file|folder)\/(\w+)$/.exec(URL.parse(url).pathname) ?? [];
+        const [, type, token] = /\b(file|folder)\/(\w+)$/.exec(new URL(url).pathname) ?? [];
         if (!type || !token) throw new Error('Invalid file system URL');
 
         /**
@@ -541,8 +548,8 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
             read: () => use_bearer({
                 path: {message_id: msg_id},
                 params: {user_id_type: 'open_id'},
-            }).with(client.im.v1.message.get).then(r=>r.items.map(i=>{
-                if(i.msg_type==='text')i.body.content=JSON.parse(i.body.content);
+            }).with(client.im.v1.message.get).then(r => r.items.map(i => {
+                if (i.msg_type === 'text') i.body.content = JSON.parse(i.body.content);
                 return i;
             })),
         }
@@ -568,6 +575,14 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
             user_id_type: 'user_id',
         },
     }).with(client.contact.v3.user.get).then(r => r.user);
+
+    const get_app=app_id=>use_bearer({
+        path: {app_id},
+        params: {
+            lang: 'zh_cn',
+        },
+    }).with(client.application.v6.application.get).then(r => r.data);
+
 
     // 按功能域组织（仅顺序优化，保持实现不变）
     // 1) 鉴权与通用：client, get_token, use_bearer

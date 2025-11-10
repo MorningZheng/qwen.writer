@@ -581,7 +581,14 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
         params: {
             lang: 'zh_cn',
         },
-    }).with(client.application.v6.application.get).then(r => r.data);
+    }).with(client.application.v6.application.get).then(r => r.app);
+
+    // const app_info=app_id=>use_bearer({
+    //     path: {app_id},
+    //     params: {
+    //         lang: 'zh_cn',
+    //     },
+    // }).with(client.application.v6.application.get).then(r => r.app);
 
 
     // 按功能域组织（仅顺序优化，保持实现不变）
@@ -604,6 +611,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
         },
         get_token,
         use_bearer,
+        get_app,
 
         // Wiki & Bitable
         get_node_info,

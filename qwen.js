@@ -143,9 +143,15 @@ const use_trim = text => {
 
 const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === String || i?.constructor === Number) ? user_say(i) : i))
     .then(input => {
+
         const messages = [], functions = [], options = {
             model: null, max_tokens: 8192, temperature: 0.7,
             enable_thinking: false,
+            extra_body:{
+                get enable_thinking(){
+                    return options.enable_thinking??false;
+                },
+            },
             cache_path: get_cache(),
             BASE_URL: use_env.__value.BASE_URL,
             [Symbol.for('inject')]: undefined,
@@ -166,7 +172,7 @@ const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === Stri
             }
         })(input);
 
-        const req = ['max_tokens', 'temperature', 'tool_choice', 'extra_body']
+        const req = ['max_tokens', 'temperature', 'tool_choice', 'extra_body','enable_thinking']
             .reduce((o, k) => (options[k] ? o[k] = options[k] : false, o),
                 Object.assign(functions.length ? {
                     get model() {
@@ -178,7 +184,7 @@ const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === Stri
                     get model() {
                         return options.model ?? use_env.__value.MODEL[0];
                     },
-                }, {messages,}),
+                }, {messages}),
             );
 
         const hash = md5([messages, functions, options, req.model].map(i => JSON.stringify(i)).join('\n'));

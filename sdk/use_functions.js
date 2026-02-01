@@ -53,6 +53,7 @@ const use_functions = (paths, inject = null) => Promise.all((Array.isArray(paths
 		}),
 )).then(async libs => {
 	libs = libs.flat();
+	const result = [];
 	for (const item of libs) {
 		const {filename} = item;
 
@@ -68,7 +69,6 @@ const use_functions = (paths, inject = null) => Promise.all((Array.isArray(paths
 		)), hash = ast['md5'];
 
 
-		const result = [];
 		for (const node of ast.program.body) {
 			if (node.type !== 'ExpressionStatement') continue;
 
@@ -171,8 +171,8 @@ const use_functions = (paths, inject = null) => Promise.all((Array.isArray(paths
 			}
 
 		}
-		return result;
 	}
+	return result;
 })
 
 module.exports = use_functions;

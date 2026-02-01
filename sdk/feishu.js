@@ -699,11 +699,11 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 		lark,
 		client,
 		use_ws(hooks, params = {}) {
-			return new lark.WSClient({
+			return new lark.WSClient(Object.assign({
 				appId: app_id,
 				appSecret: app_secret,
 				loggerLevel: lark.LoggerLevel.error,
-			}).start({eventDispatcher: new lark.EventDispatcher(params).register(hooks)});
+			}, params)).start({eventDispatcher: new lark.EventDispatcher(params).register(hooks)});
 		},
 		get_token,
 		use_bearer,
@@ -727,7 +727,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 		fields_type,
 		get_user,
 
-		send_msg: (id, data, receive_id_type) => {
+		send_msg: (id, data, receive_id_type = 'user_id') => {
 			return use_bearer({
 				params: {
 					receive_id_type,

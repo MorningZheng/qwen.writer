@@ -69,7 +69,7 @@ const use_prompt = (...names) => Promise.all(names.map((name) => fs.readFile(joi
 // ===== 消息构造相关 =====
 
 /**
- * 构造 user 消息对象。
+ * 构造 user 消消息对象。
  * @param {...string|Promise} content - 消息内容。
  * @returns {Promise<{role: string, content: string}>} user 消息对象。
  */
@@ -221,7 +221,7 @@ const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === Stri
 				 */
 				async res => {
 					const called = [];
-					let stop_output = false;
+					let stop_reason = undefined;
 					for (const item of res.choices) {
 						if (item.finish_reason === 'tool_calls') {
 							called.push(item.message);
@@ -231,7 +231,12 @@ const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === Stri
 
 								try {
 									const rs = await call($require(path)[name], JSON.parse(req.function.arguments), options[Symbol.for('inject')], res);
-									if (rs?.[Symbol.for('stop_output')]) stop_output = true;
+									if (
+										rs === Symbol.for('stop_output') || Symbol.for('stop') || Symbol.for('break')
+										|| rs?.hasOwnProperty(Symbol.for('stop_output'))
+										|| rs?.hasOwnProperty(Symbol.for('break'))
+										|| rs?.hasOwnProperty(Symbol.for('stop'))
+									) stop_reason = rs;
 									if (rs !== undefined) called.push({
 										tool_call_id: req.id,
 										index: req.index,
@@ -240,133 +245,24 @@ const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === Stri
 									});
 								} catch (e) {
 									console.error(e);
-									called.push({
-										tool_call_id: req.id,
-										index: req.index,
-										role: 'tool',
-										content: `Error: ${e.message}`,
-									});
+									// called.push({
+									// 	tool_call_id: req.id,
+									// 	index: req.index,
+									// 	role: 'tool',
+									// 	content: `Error: ${e.message}`,
+									// });
+									stop_reason=e;
 								}
 							}
 						}
 					}
 
-					if (stop_output) return;
+					if (stop_reason !== undefined) return stop_reason;
 					return called.length ? use_chat.apply(null, args.concat(...called)) : new class extends Array {
 						[Symbol.for('upstream')] = {input};
 					}(...res.choices);
 				});
 	});
-
-// /**
-//  * 递归读取指定目录下的所有函数定义（需配合 babel 解析）。
-//  * @param {string} path - 目录路径。
-//  * @param {Object} inject - 注入的变量对象。
-//  * @returns {Promise<Array>} 函数描述对象数组。
-//  */
-// const use_functions = (path, inject = null) =>
-// 	Promise.all((Array.isArray(path) ? path : [path]).map(p => fs.readdir(p, {
-// 		withFileTypes: true,
-// 		recursive: false
-// 	}).catch(e => [])))
-// 		// fs.readdir(path, {withFileTypes: true, recursive: false})
-// 		.then(async rs => {
-// 			const [key] = Object.getOwnPropertySymbols(rs[0]).filter(s => s.description === 'type');
-//
-// 			const dirs = new Set(), libs = [];
-// 			for (const f of rs.flatMap(i => i)) { //排序后再处理，文件夹优先
-// 				const {name} = f, path = f.parentPath ?? f.path;
-// 				const filename = path.slice(0, -join(path).length) + join(path, name);
-//
-// 				if (f.isDirectory()) {
-// 					// dirs.add(filename);
-// 					for (const name of ['main', 'index', 'export', 'expose']) {
-// 						const entry = join(filename, name) + '.js';
-// 						if (await fs.stat(entry).then(() => false).catch(() => true)) continue;
-// 						libs.push({
-// 							standalone: false,
-// 							filename: entry,
-// 							dir: filename,
-// 						});
-// 						break;
-// 					}
-// 				} else if (/\.js$/i.test(name)) {
-// 					libs.push({
-// 						standalone: true,
-// 						filename,
-// 						dir: f.parentPath ?? f.path,
-// 					});
-// 				}
-// 			}
-//
-// 			const result = [], field = Symbol.for('callee');
-// 			// const info = [], memo = {};
-// 			for (const {filename, standalone, dir} of libs) {
-// 				const text = await fs.readFile(filename, 'utf-8'), hash = md5(text);
-//
-// 				for (const node of babel.parse(await fs.readFile(filename, {encoding: 'utf-8'}), {
-// 					sourceType: 'module',
-// 					plugins: ['typescript', 'jsx'],
-// 					ranges: true,
-// 					tokens: true
-// 				}).program.body) {
-// 					if (node.type !== 'ExpressionStatement') continue;
-// 					const {operator, left, right} = node.expression;
-// 					if (operator !== '=' || left.object?.name !== 'module') continue;
-//
-// 					for (const fn of right?.properties ?? []) {
-// 						if (fn.kind !== 'method') continue;
-// 						const body = {}, desc = [], params = {}, required = [];
-//
-// 						for (const p of fn.params) {
-// 							if (p.type === 'Identifier') {
-// 								params[p.name] = {};
-// 								required.push(p.name);
-// 							} else if (p.type === 'AssignmentPattern') params[p.left.name] = {};
-// 						}
-//
-// 						if (!Array.isArray(fn.leadingComments)) continue;
-// 						for (const {value} of fn.leadingComments) {
-// 							for (const c of comment.parse(`/*${value}*/`)) {
-// 								desc.push(c.description);
-// 								for (const t of c.tags) {
-// 									if (/param/i.test(t.tag)) params[t.name] = {
-// 										type: t.type,
-// 										description: t.description,
-// 									};
-// 									else if (/return/i.test(t.tag)) desc.push(`函数运行后返回：${t.name}`);
-// 								}
-// 							}
-// 						}
-//
-// 						const name = `fc_${md5(hash, fn.key.name)}`,
-// 							args = Object.keys(params).join(','),
-// 							expose = new Function(`{${args}}`, `return [${args}]`);
-// 						Object.assign(body, {
-// 							name,
-// 							description: desc.join('\n'),
-// 							parameters: {
-// 								type: "object",
-// 								properties: params,
-// 								[required.length ? 'required' : Symbol('required')]: required,
-// 							},
-// 						});
-// 						result.push({
-// 							type: "function", function: body,
-// 							[field]: {
-// 								name: fn.key.name,
-// 								path: resolve(filename),
-// 								call: (fn, env = inject, arg) => {
-// 									console.log('Call', filename, name, arg, env);
-// 									return fn.call(env, ...expose(arg))
-// 								},
-// 							}
-// 						});
-// 					}
-// 				}
-// 			}
-// 			return result;
-// 		});
 
 const use_functions = require('./use_functions');
 const use_inject = value => ({inject: value});
@@ -374,6 +270,29 @@ const use_salt = value => ({salt: value});
 
 // ===== 导出 =====
 
+/**
+ * qwen SDK 导出集合。
+ *
+ * @module qwen
+ * @property {(...text: string[]) => string} md5 计算输入文本的 MD5 哈希值。
+ * @property {( ...inputs: (string|Object)[] ) => Promise<any>} use_env 加载/合并环境与配置（支持文件或对象），返回合并后的环境对象（缓存于 use_env.__value）。
+ * @property {(path: string) => Function & {__value?: string}} set_cache 设置缓存目录路径（返回自身，可读取 set_cache.__value）。
+ * @property {() => string} get_cache (内部使用) 获取解析后的缓存路径。
+ * @property {(path: string) => Function & {__path?: string}} set_prompt 设置 prompt 文件夹路径（返回自身，可读取 set_prompt.__path）。
+ * @property {(...names: string[]) => Promise<string[]>} use_prompt 读取指定名称的 prompt 文件内容（按 .md 后缀解析）。
+ * @property {( ...content: (string|Promise)[] ) => Promise<{role: string, content: string}>} user_say 构造 user 消息对象。
+ * @property {( ...content: (string|Promise)[] ) => Promise<{role: string, content: string}>} system_say 构造 system 消息对象。
+ * @property {(input: Array) => string} use_content 提取 assistant 返回中的纯文本并拼接。
+ * @property {(rs: Array) => any} use_json 从返回结果中提取并合并 JSON 内容。
+ * @property {(input: Array) => string} use_markdown 提取 assistant 返回中的 markdown 文本。
+ * @property {(text: string) => Promise<string>} use_trim 去除文本每行的统一缩进并返回处理后的文本。
+ * @property {(...args: any[]) => Promise<any>} use_chat 核心聊天调用函数；接受消息、函数描述及选项，支持缓存与工具调用。
+ * @property {*} use_functions 本地工具加载器（来自 ./use_functions）。
+ * @property {(value: any) => {inject: any}} use_inject 注入辅助对象到 options。
+ * @property {(value: any) => {salt: any}} use_salt 为请求构造 salt 包装。
+ *
+ * 说明：以上类型注释旨在提高编辑器提示与快速查阅，具体参数细节参见源码实现。
+ */
 module.exports = {
 	// 工具
 	md5,

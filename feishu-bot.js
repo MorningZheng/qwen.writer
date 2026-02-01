@@ -1,6 +1,6 @@
 // 引入飞书SDK、Qwen相关工具和fs的promise版
 const Lark = require('@larksuiteoapi/node-sdk');
-const qwen = require('./qwen.js');
+const qwen = require('./sdk/qwen.js');
 const {promises: fs} = require('fs');
 const {join} = require("path");
 

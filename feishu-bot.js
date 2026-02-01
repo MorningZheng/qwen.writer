@@ -47,13 +47,15 @@ module.exports = (env, handler) => Promise.resolve(
 
     // 初始化飞书SDK
     const feishu = require('./sdk/feishu')(env.feishu.app_id, env.feishu.app_secret);
+	// console.log('Feishu Bot initialized.');
+
 
     // handler支持自定义注入，否则用默认事件处理
     let listener;
     if (handler) {
         // $require方便handler里用依赖和env
         const $require = Object.assign(id => $require[id] ?? require(id), {env, feishu, qwen});
-        listener = await handler($require);
+        listener = await handler($require).then(r=>r??{});
     } else {
         // 用Map维护每个用户的对话上下文
         const chats = new Map();
@@ -81,16 +83,10 @@ module.exports = (env, handler) => Promise.resolve(
             'im.chat.access_event.bot_p2p_chat_entered_v1'(data) {},//暂时不启用
         };
     }
+    // 启动飞书WS监听
+    feishu.use_ws(listener).then();
 
-
-    // 初始化飞书WS客户端和事件分发器
-    const client = new Lark.WSClient({
-        appId: env.feishu.app_id,
-        appSecret: env.feishu.app_secret,
-    }), eventDispatcher = new Lark.EventDispatcher({}).register(listener);
-
-    // 启动WS客户端
-    client.start({eventDispatcher}).then();
+	return {feishu,qwen};
 });
 
 // 支持直接node运行本文件，自动加载配置并启动

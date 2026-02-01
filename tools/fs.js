@@ -37,4 +37,15 @@ module.exports = {
                 [f.isFile() ? 'isFile' : 'isDirectory']: true
             })));
     },
+
+	/**
+	 * 这是一个测试方法
+	 * @param  {object} input 输入
+	 * @param {string} input.name 名字
+	 * @param {object} shared 共享对象，可以在多次调用中保存状态
+	 */
+	test(input,shared){
+		const {name}=input;
+		return `${name},你好`;
+	},
 }

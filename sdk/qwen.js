@@ -1,5 +1,5 @@
 const fs = require('fs/promises');
-const {dirname, join, resolve, normalize,posix} = require("path");
+const {dirname, join, resolve, normalize, posix} = require("path");
 const yaml = require('yaml');
 const crypto = require("crypto");
 
@@ -224,41 +224,46 @@ const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === Stri
 				async res => {
 					const called = [];
 					let stop_reason = undefined;
-					for (const item of res.choices) {
-						if (item.finish_reason === 'tool_calls') {
-							called.push(item.message);
-							for (const req of item.message.tool_calls) {
-								const {path, name, call} = functions[req.function.name][Symbol.for('callee')];
-								console.log('Require', path, name);
 
-								try {
-									const rs = await call($require(path)[name], JSON.parse(req.function.arguments), options[Symbol.for('inject')], res);
-									if (
-										rs === Symbol.for('stop_output') || Symbol.for('stop') || Symbol.for('break')
-										|| rs?.hasOwnProperty(Symbol.for('stop_output'))
-										|| rs?.hasOwnProperty(Symbol.for('break'))
-										|| rs?.hasOwnProperty(Symbol.for('stop'))
-									) stop_reason = rs;
-									if (rs !== undefined) called.push({
-										tool_call_id: req.id,
-										index: req.index,
-										role: 'tool',
-										content: JSON.stringify(rs ?? null),
-									});
-								} catch (e) {
-									console.error(e);
-									// called.push({
-									// 	tool_call_id: req.id,
-									// 	index: req.index,
-									// 	role: 'tool',
-									// 	content: `Error: ${e.message}`,
-									// });
-									stop_reason = e;
+					LoopAsk:
+						for (const item of res.choices) {
+							if (item.finish_reason === 'tool_calls') {
+								called.push(item.message);
+								for (const req of item.message.tool_calls) {
+									const {path, name, call} = functions[req.function.name][Symbol.for('callee')];
+									console.log('Require', path, name);
+
+									try {
+										const rs = await call($require(path)[name], JSON.parse(req.function.arguments), options[Symbol.for('inject')], res);
+										if (
+											rs === Symbol.for('stop_output') || Symbol.for('stop') || Symbol.for('break')
+											|| rs?.hasOwnProperty(Symbol.for('stop_output'))
+											|| rs?.hasOwnProperty(Symbol.for('break'))
+											|| rs?.hasOwnProperty(Symbol.for('stop'))
+										) {
+											stop_reason = rs;
+											break LoopAsk;
+										} else if (rs !== undefined) called.push({
+											tool_call_id: req.id,
+											index: req.index,
+											role: 'tool',
+											content: JSON.stringify(rs ?? null),
+										});
+									} catch (e) {
+										console.error(e);
+										// called.push({
+										// 	tool_call_id: req.id,
+										// 	index: req.index,
+										// 	role: 'tool',
+										// 	content: `Error: ${e.message}`,
+										// });
+										stop_reason = e;
+									}
 								}
 							}
 						}
-					}
 
+					// console.log(stop_reason);
 					if (stop_reason !== undefined) return stop_reason;
 					return called.length ? use_chat.apply(null, args.concat(...called)) : new class extends Array {
 						[Symbol.for('upstream')] = {input};

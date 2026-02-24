@@ -236,19 +236,23 @@ const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === Stri
 									try {
 										const rs = await call($require(path)[name], JSON.parse(req.function.arguments), options[Symbol.for('inject')], res);
 										if (
-											rs === Symbol.for('stop_output') || Symbol.for('stop') || Symbol.for('break')
+											rs === Symbol.for('stop_output')
+											|| rs === Symbol.for('stop')
+											|| rs === Symbol.for('break')
 											|| rs?.hasOwnProperty(Symbol.for('stop_output'))
 											|| rs?.hasOwnProperty(Symbol.for('break'))
 											|| rs?.hasOwnProperty(Symbol.for('stop'))
 										) {
 											stop_reason = rs;
 											break LoopAsk;
-										} else if (rs !== undefined) called.push({
-											tool_call_id: req.id,
-											index: req.index,
-											role: 'tool',
-											content: JSON.stringify(rs ?? null),
-										});
+										} else if (rs !== undefined) {
+											called.push({
+												tool_call_id: req.id,
+												index: req.index,
+												role: 'tool',
+												content: JSON.stringify(rs ?? null),
+											});
+										}
 									} catch (e) {
 										console.error(e);
 										// called.push({
@@ -265,6 +269,7 @@ const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === Stri
 
 					// console.log(stop_reason);
 					if (stop_reason !== undefined) return stop_reason;
+
 					return called.length ? use_chat.apply(null, args.concat(...called)) : new class extends Array {
 						[Symbol.for('upstream')] = {input};
 					}(...res.choices);

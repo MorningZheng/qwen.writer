@@ -102,6 +102,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 				.then(token => fn(payload ?? {}, lark.withTenantToken(token)))
 				.then(res => {
 					if (res.writeFile || res.getReadableStream) return res;
+					else if (res.file_key) return res.file_key;
 					else if (res.msg === 'success') return res.data;
 					else throw Object.assign(new Error(res.msg), res);
 				});
@@ -214,19 +215,29 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 				}).with(client.bitable.v1.appTableField.list).then(rs => rs.items),
 				/**
 				 * 批量创建字段
-				 * @param {{name:string,type:string}|Array<{name:string,type:string}>} fields 字段定义（中文/英文类型名均可）
+				 * @param {{name:string,field_name:string,type:string}|Array<{name:string,field_name:string,type:string}>} fields 字段定义（中文/英文类型名均可）
 				 * @returns {Promise<any[]>} 创建结果数组
 				 */
 				add_fields(fields) {
 					const todos = [];
 					for (const item of Array.isArray(fields) ? fields : [fields]) {
-						todos.push({...fields_type[item.type.toLowerCase()], field_name: item.name});
+						todos.push({...fields_type[item.type.toLowerCase()], field_name: item.name??item.field_name});
 					}
 					const path = {app_token, table_id};
 					return Promise.all(todos.map(data => use_bearer({
 						path,
 						data
 					}).with(client.bitable.v1.appTableField.create)));
+				},
+				update_field(field_id, data) {
+					return use_bearer({
+						path: {
+							app_token,
+							table_id,
+							field_id,
+						},
+						data,
+					}).with(client.bitable.v1.appTableField.update).catch(e => (e.msg === 'DataNotChange' ? data : Promise.reject(e)));
 				},
 				get_all: () => use_bearer({
 					path: {app_token, table_id},
@@ -454,6 +465,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 						});
 						else return expose.update_card(card_id, card);
 					},
+					revoke: () => use_bearer({path: {message_id: card_id}}).with(client.im.v1.message.delete),
 					add,
 					add_md: (...texts) => add({
 						tag: 'markdown',
@@ -462,6 +474,26 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 						text_size: 'normal_v2',
 						margin: '0px 0px 0px 0px'
 					}),
+					add_rows(rows) {
+						const columns = [];
+						for (const key in rows[0]) columns.push({
+							name: key, // 列的 key（键名）。必填。用于在行数据对象数组中，指定数据填充的单元格。
+							display_name: key, // 列的展示名称。为空时不展示列名称。
+							width: "auto", // 列宽。默认值 auto。
+							data_type: rows[0][key]?.constructor === Number ? 'number' : 'text', // 列的数据类型。
+							vertical_align: "top", // 列内数据垂直对齐方式。默认值 center。
+							horizontal_align: "left" // 列内数据水平对齐方式。默认数字类型的数据右对齐，其它文本左对齐。
+						});
+
+						return add({
+							tag: 'table',
+							element_id: 'id',
+							page_size: 10,
+							freeze_first_column: true,
+							columns,
+							rows,
+						});
+					},
 					reset,
 					set_id(val) {
 						card_id = val;
@@ -479,16 +511,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 				return reset(title, summary);
 			},
 
-			reply_msg: (msg_id, data, msg_type) => use_bearer({
-				path: {
-					message_id: msg_id,
-				},
-				data: {
-					content: JSON.stringify(data.constructor === String ? {text: data} : data),
-					msg_type: 'text',
-					reply_in_thread: false,
-				},
-			}).with(client.im.v1.message.reply),
+
 			/**
 			 * 拉取群消息列表
 			 * @param {number|Date} [start] 起始时间（毫秒时间戳或 Date）
@@ -520,6 +543,29 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 		};
 
 		return expose;
+	};
+
+	const use_reactions = message_id => {
+		let reaction_id = null;
+
+		console.log(message_id);
+		return {
+			submit(emoji_type = 'SMILE') {
+				return use_bearer({
+					path: {message_id},
+					data: {
+						reaction_type: {emoji_type},
+					},
+				}).with(client.im.v1.messageReaction.create).then(rs => reaction_id = rs.reaction_id);
+			},
+			revoke() {
+				return use_bearer({path: {message_id, reaction_id}}).with(client.im.v1.messageReaction.delete)
+					.then(rs => {
+						console.log(rs);
+						reaction_id = null;
+					});
+			},
+		};
 	};
 
 	/**
@@ -626,7 +672,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 			 * 撤回消息
 			 * @returns {Promise<object>}
 			 */
-			revoke: () => use_bearer({path: {msg_id}}).with(client.im.v1.message.revoke),
+			revoke: () => use_bearer({path: {message_id: msg_id}}).with(client.im.v1.message.delete),
 			/**
 			 * 回复消息（线程内）
 			 * @param {object} data 回复内容
@@ -718,6 +764,8 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 		// IM
 		use_chat,
 		use_msg,
+		use_reactions
+		,
 		get_chat_list,
 
 		// Drive
@@ -739,6 +787,24 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 				},
 			}).with(client.im.v1.message.create);
 		},
+		upload_file: (id, file_name, file_stream, receive_id_type = 'chat_id') => use_bearer({
+			data: {
+				file_type: 'stream',
+				file_name,
+				file: file_stream,
+			},
+		})
+			.with(client.im.v1.file.create)
+			.then(file_key => use_bearer({
+				params: {
+					receive_id_type,
+				},
+				data: {
+					receive_id: id,
+					msg_type: 'file',
+					content: JSON.stringify({file_key}),
+				},
+			}).with(client.im.v1.message.create)),
 	}
 }
 

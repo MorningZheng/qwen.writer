@@ -93,7 +93,7 @@ const system_say = (...content) =>
  */
 const use_content = input => {
 	const res = [];
-	for (const {message: {content}} of input) res.push(content);
+	for (const {message: {content} = {}} of input) content ? res.push(content) : void 0;
 	return res.join('\r\n').trim();
 }
 
@@ -109,12 +109,13 @@ const use_json = rs => {
 /**
  * 提取 assistant 返回内容中的 markdown 文本。
  * @param {Array} input - assistant 返回的消息数组。
+ * @param {string} type - 可选参数，指定提取类型（如 'markdown'）。
  * @returns {string} 拼接后的 markdown 内容。
  */
-const use_markdown = input => {
-	const res = [];
+const use_markdown = (input, type) => {
+	const res = [], head = '```' + (type ?? 'markdown');
 	for (const {message: {content}} of input) {
-		if (content.slice('```markdown')) res.push(content.slice('```markdown`'.length, -3).trim());
+		if (content.slice(0, head.length) === head) res.push(content.slice(head.length, -3).trim());
 		else res.push(content);
 	}
 	return res.join('\r\n');
@@ -154,14 +155,20 @@ const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === Stri
 				},
 			},
 			cache_path: get_cache(),
-			BASE_URL: use_env.__value.BASE_URL,
+
+			API_KEY: use_env.__value?.API_KEY,
+			BASE_URL: use_env.__value?.BASE_URL,
+
 			[Symbol.for('inject')]: undefined,
 		};
 
+		const input_content = [];
 		(function walk(rows) {
 			for (const item of rows) {
 				if (!item) continue;
-				if (Array.isArray(item)) {
+				if (Buffer.isBuffer(item)) messages.push({role: "user", content: item.toString()});
+				else if (item?.constructor === String) input_content.push(item.toString());
+				else if (Array.isArray(item)) {
 					if (Array.isArray(item[Symbol.for('upstream')]?.input)) walk(item[Symbol.for('upstream')]?.input);
 					walk(item);
 				} else if (item.hasOwnProperty('role') && item.hasOwnProperty('content')) messages.push(item);
@@ -172,20 +179,24 @@ const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === Stri
 				else if (item.constructor === Object) Object.assign(options, item);
 			}
 		})(input);
+		if (input_content.length) messages.push({role: "user", content: input_content.join('\n\n')});
 
 		const req = ['max_tokens', 'temperature', 'tool_choice', 'extra_body', 'enable_thinking']
-			.reduce((o, k) => (options[k] ? o[k] = options[k] : false, o),
-				Object.assign(functions.length ? {
-					get model() {
-						return options.model ?? use_env.__value.MODEL[1] ?? use_env.__value.MODEL[0];
+			.reduce((o, k) => (options.hasOwnProperty(k) ? o[k] = options[k] : void 0, o),
+				Object.assign(
+					functions.length ? {
+						get model() {
+							return options.model ?? use_env.__value.MODEL[1] ?? use_env.__value.MODEL[0];
+						},
+						tools: functions,
+						parallel_tool_calls: false,
+					} : {
+						get model() {
+							return options.model ?? use_env.__value?.MODEL[0];
+						},
 					},
-					tools: functions,
-					parallel_tool_calls: false,
-				} : {
-					get model() {
-						return options.model ?? use_env.__value.MODEL[0];
-					},
-				}, {messages}),
+					{messages},
+				),
 			);
 
 		const hash = md5([messages, functions, options, req.model].map(i => JSON.stringify(i)).join('\n'));
@@ -197,10 +208,10 @@ const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === Stri
 		console.log(`\x1b[33mAsking :${content.length > 100 ? `${content.slice(0, 100)}...` : content}\x1b[0m`);
 		return fs.readFile(cache_path, 'utf-8')
 			.then(t => yaml.parse(t).res)
-			.catch(e => fetch(`${options.BASE_URL}/chat/completions`, {
+			.catch(e => fetch(`${options.BASE_URL ?? options.base_url}/chat/completions`, {
 					method: 'POST',
 					headers: {
-						Authorization: `Bearer ${use_env.__value.API_KEY}`,
+						Authorization: `Bearer ${options.API_KEY ?? options.api_key}`,
 						'Content-Type': 'application/json',
 					},
 					body: JSON.stringify(req),
@@ -454,9 +465,7 @@ const use_salt = value => ({salt: value});
 // ===== 导出 =====
 
 /**
- * qwen SDK 导出集合。
- *
- * @module qwen
+ * @typedef {Object} use_qwen
  * @property {(...text: string[]) => string} md5 计算输入文本的 MD5 哈希值。
  * @property {( ...inputs: (string|Object)[] ) => Promise<any>} use_env 加载/合并环境与配置（支持文件或对象），返回合并后的环境对象（缓存于 use_env.__value）。
  * @property {(path: string) => Function & {__value?: string}} set_cache 设置缓存目录路径（返回自身，可读取 set_cache.__value）。
@@ -473,8 +482,11 @@ const use_salt = value => ({salt: value});
  * @property {*} use_functions 本地工具加载器（来自 ./use_functions）。
  * @property {(value: any) => {inject: any}} use_inject 注入辅助对象到 options。
  * @property {(value: any) => {salt: any}} use_salt 为请求构造 salt 包装。
- *
- * 说明：以上类型注释旨在提高编辑器提示与快速查阅，具体参数细节参见源码实现。
+ */
+
+
+/**
+ * @type {use_qwen}
  */
 module.exports = {
 	// 工具

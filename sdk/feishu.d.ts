@@ -15,6 +15,14 @@ declare interface UseTable {
 
     add(item: object | object[]): Promise<any>;
 
+    //    fieldsArray: Array<any>
+    update(records: Array<{
+        record_id?: string;
+        fields: Array<{ [p: number]: any | number }>
+    }>): Promise<any>;
+
+    update(record_id: string, field: { [p: number]: any | number }): Promise<any>;
+
     get_fields(): Promise<any[]>;
 
     add_fields(fields: { name: string; filed_name: string; type: string } | Array<{
@@ -23,7 +31,12 @@ declare interface UseTable {
         type: string
     }>): Promise<any[]>;
 
-    get_all(): Promise<any[]>;
+    get_all(page_size: number, options: {
+        sort: Array<{
+            field_name: string,
+            desc: boolean
+        }>
+    }): Promise<any[]>;
 
     update_field(field_id: string, data: {
         filed_name: string;

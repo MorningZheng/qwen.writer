@@ -101,7 +101,8 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 			return get_token()
 				.then(token => fn(payload ?? {}, lark.withTenantToken(token)))
 				.then(res => {
-					if (res.writeFile || res.getReadableStream) return res;
+					if (res.hasOwnProperty(Symbol.asyncIterator) || res.hasOwnProperty(Symbol.iterator)) return res;
+					else if (res.writeFile || res.getReadableStream) return res;
 					else if (res.file_key) return res.file_key;
 					else if (res.msg === 'success') return res.data;
 					else throw Object.assign(new Error(res.msg), res);
@@ -203,6 +204,24 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 						data,
 					}).with(client.bitable.v1.appTableRecord[call]);
 				},
+				update(...input) {
+					const records = [];
+					if (Array.isArray(input[0]) && input.length === 1) Array.prototype.push.apply(records, input[0]);
+					else if (input[1]?.constructor === Object) records.push({
+						record_id: input[0],
+						fields: input[1],
+					});
+
+					return use_bearer({
+						path: {app_token, table_id},
+						params: {
+							user_id_type: 'open_id',
+							client_token: uuid.use(records),
+							ignore_consistency_check: true,
+						},
+						data: {records},
+					}).with(client.bitable.v1.appTableRecord.batchUpdate);
+				},
 				/**
 				 * 获取表字段列表
 				 * @returns {Promise<object[]>} 字段数组
@@ -221,7 +240,10 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 				add_fields(fields) {
 					const todos = [];
 					for (const item of Array.isArray(fields) ? fields : [fields]) {
-						todos.push({...fields_type[item.type.toLowerCase()], field_name: item.name??item.field_name});
+						todos.push({
+							...item.type.constructor === String ? fields_type[item.type.toLowerCase()] : item,
+							field_name: item.name ?? item.field_name
+						});
 					}
 					const path = {app_token, table_id};
 					return Promise.all(todos.map(data => use_bearer({
@@ -239,11 +261,12 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 						data,
 					}).with(client.bitable.v1.appTableField.update).catch(e => (e.msg === 'DataNotChange' ? data : Promise.reject(e)));
 				},
-				get_all: () => use_bearer({
+				get_all: (page_size = 99, options) => use_bearer({
 					path: {app_token, table_id},
 					params: {
-						page_size: 999,
+						page_size,
 					},
+					data: options,
 				}).with(client.bitable.v1.appTableRecord.search).then(rs => rs.items),
 			}
 		},

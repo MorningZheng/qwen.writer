@@ -31,7 +31,7 @@ declare interface UseTable {
         type: string
     }>): Promise<any[]>;
 
-    get_all(page_size: number, options: {
+    get_all(page_size?: number, options?: {
         sort: Array<{
             field_name: string,
             desc: boolean

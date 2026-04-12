@@ -129,6 +129,10 @@ declare interface UseFsFile {
     read_file(): Promise<Buffer>;
 
     read_yaml(): Promise<any>;
+
+    create_read_stream(): Promise<ReadableStream<any>>;
+
+    meta(): Promise<Array<{ title: string, doc_token: string, doc_type: string }>>;
 }
 
 declare interface UseFsFolder {

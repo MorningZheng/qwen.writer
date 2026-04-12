@@ -78,7 +78,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 
 		//e.response.data
 		const rs = await client.auth.v3.tenantAccessToken.internal({data: {app_id, app_secret}}).catch(e => e);
-		if (rs instanceof Error) throw new Error(rs.response.data);
+		if (rs instanceof Error) throw rs;
 		if (rs?.msg === 'ok') {
 			rs.until = (rs.expire - 30) * 1000 + Date.now();
 			return fs.writeFile(token_cache.get(key).filename, JSON.stringify(rs), 'utf8').then(() => rs.tenant_access_token);
@@ -104,7 +104,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 					if (res.hasOwnProperty(Symbol.asyncIterator) || res.hasOwnProperty(Symbol.iterator)) return res;
 					else if (res.writeFile || res.getReadableStream) return res;
 					else if (res.file_key) return res.file_key;
-					else if (res.msg === 'success') return res.data;
+					else if (res.msg === 'success' || res.msg === 'Success') return res.data;
 					else throw Object.assign(new Error(res.msg), res);
 				});
 		},
@@ -591,6 +591,10 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 		};
 	};
 
+	const use_file_stream = file_token => use_bearer({path: {file_token}})
+		.with(client.drive.v1.file.download)
+		.then(rs => rs.getReadableStream());
+
 	/**
 	 * Drive 文件/文件夹访问器
 	 * @param {string} url 形如 https://.../(file|folder)/{token}
@@ -600,43 +604,52 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 		const [, type, token] = /\b(file|folder)\/(\w+)$/.exec(new URL(url).pathname) ?? [];
 		if (!type || !token) throw new Error('Invalid file system URL');
 
-		/**
-		 * 下载文件为 Buffer
-		 * @param {string} file_token 文件 token
-		 * @returns {Promise<Buffer>}
-		 */
-		const read_file = file_token => use_bearer({path: {file_token}})
-			.with(client.drive.v1.file.download)
-			.then(rs => new Promise(rel => {
+
+		if (/file/ig.test(type)) {
+
+			const create_read_stream = () => use_file_stream(token);
+
+			/**
+			 * 下载文件为 Buffer
+			 * @param {string} file_token 文件 token
+			 * @returns {Promise<Buffer>}
+			 */
+			const read_file = () => create_read_stream().then(stream => new Promise(rel => {
 				const data = [];
-				rs.getReadableStream().on('data', buf => data.push(buf)).once('end', () => {
+				stream.getReadableStream().on('data', buf => data.push(buf)).once('end', () => {
 					rel(Buffer.concat(data));
 					data.length = 0;
 				});
 			}));
-		/**
-		 * 下载 YAML 并解析为对象
-		 * @param {string} file_token 文件 token
-		 * @returns {Promise<any>}
-		 */
-		const read_yaml = file_token => read_file(file_token).then(buf => yaml.parse(buf.toString()));
 
-		if (/file/ig.test(type)) {
 			return {
+				create_read_stream,
 				/**
 				 * 读取文件 Buffer
 				 * @returns {Promise<Buffer>}
 				 */
-				read_file() {
-					return read_file(token);
-				},
+				read_file,
 				/**
 				 * 读取 YAML 并解析
 				 * @returns {Promise<any>}
 				 */
 				read_yaml() {
-					return read_yaml(token);
+					return read_file().then(buf => yaml.parse(buf.toString()));
 				},
+				meta: () => use_bearer({
+					params: {
+						user_id_type: 'user_id',
+					},
+					data: {
+						"request_docs": [
+							{
+								doc_token: token,
+								doc_type: "file"
+							}
+						],
+						"with_url": false
+					},
+				}).with(client.drive.v1.meta.batchQuery).then(rs => rs?.metas?.[0]),
 			}
 		} else if (/folder/ig.test(type)) {
 			const folder_token = token;

@@ -222,6 +222,15 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 						data: {records},
 					}).with(client.bitable.v1.appTableRecord.batchUpdate);
 				},
+				get_rows:(...record_ids)=>use_bearer({
+					path: {app_token, table_id},
+					data: {
+						record_ids,
+						user_id_type: 'open_id',
+						with_shared_url: true,
+						automatic_fields: true,
+					},
+				}).with(client.bitable.v1.appTableRecord.batchGet).then(rs => rs.records),
 				/**
 				 * 获取表字段列表
 				 * @returns {Promise<object[]>} 字段数组
@@ -715,10 +724,10 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 			 * @returns {Promise<object>}
 			 */
 			reply: data => use_bearer({
-				path: {msg_id},
+				path: {message_id:msg_id},
 				data: {
 					...data,
-					reply_in_thread: true,
+					reply_in_thread: false,
 				},
 			}).with(client.im.v1.message.reply),
 			read: () => use_bearer({

@@ -757,10 +757,10 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 	 * @param {string} type 查询的类型
 	 * @returns {Promise<object>} 用户详情
 	 */
-	const get_user = (user_id,type='user_id') => use_bearer({
+	const get_user = (user_id, type = 'user_id') => use_bearer({
 		path: {user_id},
 		params: {
-			department_id_type: type==='user_id'?'department_id':'open_department_id',
+			department_id_type: type === 'user_id' ? 'department_id' : 'open_department_id',
 			user_id_type: type,
 		},
 	}).with(client.contact.v3.user.get).then(r => r.user);
@@ -834,14 +834,15 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 		get_users,
 
 		send_msg: (id, data, receive_id_type = 'user_id') => {
+			const msg_type = data.constructor === String ? 'text' : 'interactive';
 			return use_bearer({
 				params: {
 					receive_id_type,
 				},
 				data: {
 					receive_id: id,
-					msg_type: 'text',
-					content: JSON.stringify(data.constructor === String ? {text: data} : data),
+					msg_type,
+					content: JSON.stringify(msg_type === 'text' ? {text: data} : data),
 				},
 			}).with(client.im.v1.message.create);
 		},

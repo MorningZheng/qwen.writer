@@ -222,7 +222,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 						data: {records},
 					}).with(client.bitable.v1.appTableRecord.batchUpdate);
 				},
-				get_rows:(...record_ids)=>use_bearer({
+				get_rows: (...record_ids) => use_bearer({
 					path: {app_token, table_id},
 					data: {
 						record_ids,
@@ -555,13 +555,18 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 				params: {
 					container_id_type: 'chat',
 					container_id: chat_id,
-					start_time: start ? Math.floor((start instanceof Date ? start.getTime() : start) / 1000) : undefined,
-					end_time: until ? Math.ceil((until instanceof Date ? until.getTime() : until) / 1000) : undefined,
+					start_time: Math.floor(Date.now() / 1000 - 24 * 60 * 60),
+					until: Math.floor(Date.now() / 1000),
+					// start_time: start ? Math.floor((start instanceof Date ? start.getTime() : start) / 1000) : undefined,
+					// end_time: until ? Math.ceil((until instanceof Date ? until.getTime() : until) / 1000) : undefined,
 					sort_type: 'ByCreateTimeDesc',
 					page_size: Number.isInteger(page_token) ? page_token : 20,
-					page_token,
+					[Number.isInteger(page_token) ? Symbol() : 'page_token']: page_token,
 				},
-			}).with(client.im.v1.message.list).then(r => r.items),
+			}).with(client.im.v1.message.list).then(r => Object.assign(r.items, {
+				[Symbol.for('page_token')]: r?.page_token,
+				[Symbol.for('has_more')]: r?.has_more,
+			})),
 			get_tabs: () => use_bearer({path: {chat_id}}).with(client.im.v1.chatTab.listTabs).then(r => r.chat_tabs),
 			prev_msg: (start_time = dayjs().subtract(3, 'day').unix()) => use_bearer({
 				params: {
@@ -579,8 +584,6 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 
 	const use_reactions = message_id => {
 		let reaction_id = null;
-
-		console.log(message_id);
 		return {
 			submit(emoji_type = 'SMILE') {
 				return use_bearer({
@@ -724,7 +727,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 			 * @returns {Promise<object>}
 			 */
 			reply: data => use_bearer({
-				path: {message_id:msg_id},
+				path: {message_id: msg_id},
 				data: {
 					...data,
 					reply_in_thread: false,
@@ -751,15 +754,24 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 	/**
 	 * 获取用户信息
 	 * @param {string} user_id 用户 ID
+	 * @param {string} type 查询的类型
 	 * @returns {Promise<object>} 用户详情
 	 */
-	const get_user = user_id => use_bearer({
+	const get_user = (user_id,type='user_id') => use_bearer({
 		path: {user_id},
 		params: {
-			department_id_type: 'department_id',
-			user_id_type: 'user_id',
+			department_id_type: type==='user_id'?'department_id':'open_department_id',
+			user_id_type: type,
 		},
 	}).with(client.contact.v3.user.get).then(r => r.user);
+
+	const get_users = user_idx => use_bearer({
+		params: {
+			user_ids: Array.isArray(user_idx) ? user_idx : [user_idx],
+			user_id_type: 'open_id',
+			department_id_type: 'open_department_id',
+		},
+	}).with(client.contact.v3.user.batch).then(r => r.items);
 
 	const get_app = (id = app_id) => use_bearer({
 		path: {app_id: id},
@@ -819,6 +831,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 		// 其他
 		fields_type,
 		get_user,
+		get_users,
 
 		send_msg: (id, data, receive_id_type = 'user_id') => {
 			return use_bearer({

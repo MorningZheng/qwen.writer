@@ -24,7 +24,8 @@ declare interface UseTable {
     update(record_id: string, field: { [p: number]: any | number }): Promise<any>;
 
     get_fields(): Promise<any[]>;
-    get_rows(record_ids:string[]): Promise<any[]>;
+
+    get_rows(record_ids: string[]): Promise<any[]>;
 
     add_fields(fields: { name: string; filed_name: string; type: string } | Array<{
         name: string;
@@ -33,10 +34,18 @@ declare interface UseTable {
     }>): Promise<any[]>;
 
     get_all(page_size?: number, options?: {
-        sort: Array<{
+        sort?: Array<{
             field_name: string,
             desc: boolean
         }>
+        filter?: {
+            conjunction: 'and' | 'or',
+            conditions: Array<{
+                field_name: string,
+                operator: string,
+                value: Array<string | number>
+            }>
+        }
     }): Promise<any[]>;
 
     update_field(field_id: string, data: {

@@ -117,6 +117,8 @@ declare interface UseChat {
     get_tabs(): Promise<any[]>;
 
     prev_msg(start_time?: number): Promise<any>;
+
+    patch(id: string, text: string): Promise<any>;
 }
 
 declare interface UseMsg {
@@ -207,5 +209,72 @@ export interface FeishuClient {
 
 export function createFeishuClient(app_id: string, app_secret: string, temp_dir: string, expired_delay?: number): FeishuClient;
 
+declare interface FeishuMessageReceiveEvent {
+    schema: string;
+    event_id: string;
+    token: string;
+    create_time: string;
+    event_type: "im.message.receive_v1";
+    tenant_key: string;
+    app_id: string;
+    message: {
+        chat_id: string;
+        chat_type: string;
+        content: string;
+        create_time: string;
+        mentions?: Array<{
+            id: {
+                open_id: string;
+                union_id: string;
+                user_id: string;
+            };
+            key: string;
+            mentioned_type: string;
+            name: string;
+            tenant_key: string;
+        }>;
+        message_id: string;
+        message_type: string;
+        parent_id?: string;
+        root_id?: string;
+        update_time: string;
+        text?: string;
+    };
+    sender: {
+        sender_id: {
+            open_id: string;
+            union_id: string;
+            user_id: string;
+        };
+        sender_type: string;
+        tenant_key: string;
+    };
+}
 
-
+declare interface FeishuCardActionTriggerEvent {
+    schema: string;
+    event_id: string;
+    token: string;
+    create_time: string;
+    event_type: "card.action.trigger";
+    tenant_key: string;
+    app_id: string;
+    operator: {
+        tenant_key: string;
+        user_id: string;
+        open_id: string;
+        union_id: string;
+    };
+    action: {
+        value: any;
+        tag: string;
+        timezone: string;
+        form_value?: any;
+        name?: string;
+    };
+    host: string;
+    context: {
+        open_message_id: string;
+        open_chat_id: string;
+    };
+}

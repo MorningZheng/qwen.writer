@@ -288,7 +288,7 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 	 */
 	const use_table = async url => {
 		const u = new URL(url), info = await get_node_info(u);
-		const book = use_bit(info.obj_token ?? info.app_token);
+		const book = use_bit(info?.obj_token ?? info.app_token);
 		return {
 			book,
 			table: book.use_table(u.searchParams.get('table') ?? await book.get_tables()

@@ -485,8 +485,8 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 					if (summary) handler.set_summary(summary);
 					card.body.elements = [];
 					return handler;
-				}, add = element => {
-					card.body.elements.push(element);
+				}, add = elements => {
+					Array.prototype.push.apply(card.body.elements, Array.isArray(elements) ? elements : [elements]);
 					return handler;
 				};
 				const handler = {

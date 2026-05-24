@@ -204,7 +204,7 @@ export interface FeishuClient {
 
     send_msg(id: string, data: any, receive_id_type?: string): Promise<any>;
 
-    upload_file(id: string, file_name: string, file_stream: ReadableStream<any>, receive_id_type?: string): Promise<any>;
+    upload_file(id: string, file_name: string, file_stream: ReadableStream|import('stream').Readable, receive_id_type?: string): Promise<any>;
 }
 
 export function createFeishuClient(app_id: string, app_secret: string, temp_dir: string, expired_delay?: number): FeishuClient;

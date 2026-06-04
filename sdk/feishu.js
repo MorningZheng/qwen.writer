@@ -555,8 +555,8 @@ module.exports = (app_id, app_secret, temp_dir, expired_delay = 0.1 * 60 * 1000)
 				params: {
 					container_id_type: 'chat',
 					container_id: chat_id,
-					start_time: Math.floor(Date.now() / 1000 - 24 * 60 * 60),
-					until: Math.floor(Date.now() / 1000),
+					start_time: Math.floor((start?.getTime() ?? start ?? (Date.now() / -24 * 60 * 60 * 1000)) / 1000),
+					until: Math.floor((until?.getTime() ?? until ?? Date.now()) / 1000),
 					// start_time: start ? Math.floor((start instanceof Date ? start.getTime() : start) / 1000) : undefined,
 					// end_time: until ? Math.ceil((until instanceof Date ? until.getTime() : until) / 1000) : undefined,
 					sort_type: 'ByCreateTimeDesc',

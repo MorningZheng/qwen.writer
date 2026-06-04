@@ -42,7 +42,7 @@ declare interface UseTable {
             conjunction: 'and' | 'or',
             conditions: Array<{
                 field_name: string,
-                operator: string,
+                operator: 'is' | 'isNot' | 'contains' | 'doesNotContain' | 'isEmpty' | 'isNotEmpty' | 'isGreater' | 'isGreaterEqual' | 'isLess' | 'isLessEqual',
                 value: Array<string | number>
             }>
         }

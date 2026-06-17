@@ -181,7 +181,7 @@ const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === Stri
 		})(input);
 		if (input_content.length) messages.push({role: "user", content: input_content.join('\n\n')});
 
-		const req = ['max_tokens', 'temperature', 'tool_choice', 'extra_body', 'enable_thinking']
+		const req = ['max_tokens', 'temperature', 'tool_choice', 'extra_body', 'enable_thinking','response_format']
 			.reduce((o, k) => (options.hasOwnProperty(k) ? o[k] = options[k] : void 0, o),
 				Object.assign(
 					functions.length ? {
@@ -198,6 +198,7 @@ const use_chat = (...args) => Promise.all(args.map(i => (i?.constructor === Stri
 					{messages},
 				),
 			);
+
 
 		const hash = md5([messages, functions, options, req.model].map(i => JSON.stringify(i)).join('\n'));
 
